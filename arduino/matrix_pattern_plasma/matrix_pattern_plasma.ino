@@ -138,6 +138,7 @@ void setup() {
   mxconfig.mx_height = PANEL_HEIGHT;      // we have 64 pix heigh panels
   mxconfig.chain_length = PANELS_NUMBER;  // we have 2 panels chained
   mxconfig.gpio.e = PIN_E;                // we MUST assign pin e to some free pin on a board to drive 64 pix height panels with 1/32 scan
+  mxconfig.clkphase = false;              // fixes edge-address ghosting on this panel revision
   //mxconfig.driver = HUB75_I2S_CFG::FM6126A;     // in case that we use panels based on FM6126A chip, we can change that
 
   /*
