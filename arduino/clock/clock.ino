@@ -1684,7 +1684,7 @@ void createStartupClockScene() {
     footer->style.x = 0;
     footer->style.y = footerZoneHeight - static_cast<int16_t>(footerMetrics.height) - footerMetrics.y1;
     footer->scrollEnabled = true;
-    footer->scrollMode = SCROLL_MODE_BOUNCE;
+    footer->scrollMode = SCROLL_MODE_LOOP;
     footer->scrollSpeedPxPerSec = DEFAULT_SCROLL_SPEED_PX_PER_SEC;
     footer->scrollPauseMs = DEFAULT_SCROLL_PAUSE_MS;
     resetTextAnimation(*footer);
