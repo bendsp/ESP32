@@ -1,6 +1,7 @@
 #include <ESP32-HUB75-MatrixPanel-I2S-DMA.h>
 #include <WiFi.h>
 #include "clock_config.h"
+#include <time.h>
 #include <ctype.h>
 #include <limits.h>
 #include <math.h>
@@ -42,6 +43,8 @@
 #define DEFAULT_SCROLL_GAP_PX 8
 #define WIFI_CONNECT_TIMEOUT_MS 20000
 #define WIFI_STATUS_INTERVAL_MS 500
+#define INITIAL_TIME_SYNC_TIMEOUT_MS 10000
+#define TIME_SYNC_RETRY_INTERVAL_MS 60000
 
 enum ScrollMode : uint8_t {
   SCROLL_MODE_BOUNCE = 0,
@@ -91,6 +94,11 @@ struct SceneState {
   uint8_t brightness;
   unsigned long blinkIntervalMs;
   bool lastBlinkVisible;
+  bool wifiConnected;
+  bool timeSynced;
+  unsigned long lastTimeSyncAttemptMs;
+  uint16_t clockHoursId;
+  uint16_t clockMinutesId;
   Zone zones[MAX_ZONES];
   TextElement textElements[MAX_TEXT_ELEMENTS];
   uint16_t nextZoneId;
@@ -441,6 +449,11 @@ void initScene() {
   scene.brightness = PANEL_BRIGHTNESS;
   scene.blinkIntervalMs = DEFAULT_BLINK_INTERVAL_MS;
   scene.lastBlinkVisible = true;
+  scene.wifiConnected = false;
+  scene.timeSynced = false;
+  scene.lastTimeSyncAttemptMs = 0;
+  scene.clockHoursId = 0;
+  scene.clockMinutesId = 0;
   scene.nextZoneId = 1;
   scene.nextTextElementId = 1;
   scene.nextDrawOrder = 1;
@@ -458,6 +471,8 @@ void clearScene() {
   scene.nextZoneId = 1;
   scene.nextTextElementId = 1;
   scene.nextDrawOrder = 1;
+  scene.clockHoursId = 0;
+  scene.clockMinutesId = 0;
 
   for (uint8_t i = 0; i < MAX_ZONES; i++) {
     resetZone(scene.zones[i]);
@@ -1037,7 +1052,81 @@ bool connectToWifi() {
   Serial.println(WiFi.localIP());
   Serial.print("RSSI: ");
   Serial.println(WiFi.RSSI());
+  scene.wifiConnected = true;
   return true;
+}
+
+bool syncTimeFromInternet() {
+  if (!isWifiConnected()) {
+    Serial.println("Cannot sync time without Wi-Fi");
+    scene.timeSynced = false;
+    return false;
+  }
+
+  scene.lastTimeSyncAttemptMs = millis();
+  configTzTime(TIME_ZONE, NTP_SERVER_1, NTP_SERVER_2);
+  Serial.println("Syncing time from NTP...");
+
+  struct tm timeInfo;
+  if (!getLocalTime(&timeInfo, INITIAL_TIME_SYNC_TIMEOUT_MS)) {
+    Serial.println("Initial NTP sync failed");
+    scene.timeSynced = false;
+    return false;
+  }
+
+  scene.timeSynced = true;
+  Serial.print("Time synced: ");
+  Serial.println(&timeInfo, "%H:%M:%S %d/%m/%Y");
+  return true;
+}
+
+bool updateClockDisplayFromRtc() {
+  if (scene.clockHoursId == 0 || scene.clockMinutesId == 0) {
+    return false;
+  }
+
+  struct tm timeInfo;
+  if (!getLocalTime(&timeInfo, 10)) {
+    scene.timeSynced = false;
+    return false;
+  }
+
+  scene.timeSynced = true;
+
+  char hoursText[3];
+  char minutesText[3];
+  snprintf(hoursText, sizeof(hoursText), "%02d", timeInfo.tm_hour);
+  snprintf(minutesText, sizeof(minutesText), "%02d", timeInfo.tm_min);
+
+  bool changed = false;
+  const TextElement* hoursElement = getTextElement(scene.clockHoursId);
+  if (hoursElement != nullptr && strcmp(hoursElement->content, hoursText) != 0) {
+    setTextElementContent(scene.clockHoursId, hoursText, nullptr);
+    changed = true;
+  }
+
+  const TextElement* minutesElement = getTextElement(scene.clockMinutesId);
+  if (minutesElement != nullptr && strcmp(minutesElement->content, minutesText) != 0) {
+    setTextElementContent(scene.clockMinutesId, minutesText, nullptr);
+    changed = true;
+  }
+
+  return changed;
+}
+
+void maintainTimeSync() {
+  if (!scene.wifiConnected || scene.timeSynced) {
+    return;
+  }
+
+  unsigned long nowMs = millis();
+  if (nowMs - scene.lastTimeSyncAttemptMs < TIME_SYNC_RETRY_INTERVAL_MS) {
+    return;
+  }
+
+  if (syncTimeFromInternet()) {
+    renderScene();
+  }
 }
 
 bool setBrightnessLevel(int value) {
@@ -1731,8 +1820,8 @@ void createStartupClockScene() {
   TextStyle clockStyle = defaultTextStyle();
   clockStyle.size = 2;
 
-  TextMetrics fullMetrics = measureTextAt("12:34", clockStyle.size, 0, 0);
-  TextMetrics hoursMetrics = measureTextAt("12", clockStyle.size, 0, 0);
+  TextMetrics fullMetrics = measureTextAt("XX:XX", clockStyle.size, 0, 0);
+  TextMetrics hoursMetrics = measureTextAt("XX", clockStyle.size, 0, 0);
   TextMetrics colonMetrics = measureTextAt(":", clockStyle.size, 0, 0);
 
   int16_t groupX = (PANEL_WIDTH - static_cast<int16_t>(fullMetrics.width)) / 2 - fullMetrics.x1;
@@ -1741,7 +1830,7 @@ void createStartupClockScene() {
   TextStyle hoursStyle = clockStyle;
   hoursStyle.x = groupX;
   hoursStyle.y = groupY;
-  createTextElement("12", hoursStyle, nullptr);
+  scene.clockHoursId = createTextElement("XX", hoursStyle, nullptr);
 
   TextStyle colonStyle = clockStyle;
   colonStyle.x = groupX + static_cast<int16_t>(hoursMetrics.width);
@@ -1752,7 +1841,7 @@ void createStartupClockScene() {
   TextStyle minutesStyle = clockStyle;
   minutesStyle.x = colonStyle.x + static_cast<int16_t>(colonMetrics.width);
   minutesStyle.y = groupY;
-  createTextElement("34", minutesStyle, nullptr);
+  scene.clockMinutesId = createTextElement("XX", minutesStyle, nullptr);
 
   TextStyle footerStyle = defaultTextStyle();
   footerStyle.size = 1;
@@ -1805,11 +1894,20 @@ void setup() {
   Serial.print(scene.blinkIntervalMs);
   Serial.println(" ms");
   connectToWifi();
+  if (scene.wifiConnected) {
+    syncTimeFromInternet();
+    updateClockDisplayFromRtc();
+    renderScene();
+  }
   printHelp();
 }
 
 void loop() {
   pollSerialCommands();
+  maintainTimeSync();
+  if (updateClockDisplayFromRtc()) {
+    renderScene();
+  }
   if (updateAnimatedScene(millis())) {
     renderScene();
   }
