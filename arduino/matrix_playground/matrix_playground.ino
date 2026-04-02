@@ -36,6 +36,15 @@ uint8_t currentScene = 1;
 CRGB currentColor;
 CRGBPalette16 palettes[] = {RainbowColors_p, RainbowStripeColors_p, OceanColors_p, CloudColors_p};
 CRGBPalette16 currentPalette = palettes[0];
+String currentText = "HELLO";
+int16_t textX = 2;
+int16_t textY = 12;
+uint8_t textSize = 1;
+uint8_t textRed = 255;
+uint8_t textGreen = 255;
+uint8_t textBlue = 255;
+bool textBackgroundBox = false;
+bool autoTextRedraw = true;
 
 bool beginMatrix() {
   HUB75_I2S_CFG::i2s_pins pins = {
@@ -126,7 +135,6 @@ void setup() {
   Serial.println(MATRIX_LAT_BLANKING);
   Serial.print("Brightness: ");
   Serial.println(currentBrightness);
-
   setPlasmaScene(3);
 }
 
@@ -197,6 +205,55 @@ void setBrightnessLevel(int value) {
   matrix->setBrightness8(currentBrightness);
   Serial.print("Brightness set to ");
   Serial.println(currentBrightness);
+}
+
+uint16_t to565(uint8_t red, uint8_t green, uint8_t blue) {
+  return matrix->color565(red, green, blue);
+}
+
+void drawConfiguredText() {
+  stopPlasma();
+  clearScreen();
+  matrix->setTextWrap(false);
+  matrix->setTextSize(textSize);
+
+  uint16_t fgColor = to565(textRed, textGreen, textBlue);
+
+  if (textBackgroundBox) {
+    int16_t x1;
+    int16_t y1;
+    uint16_t w;
+    uint16_t h;
+    matrix->getTextBounds(currentText, textX, textY, &x1, &y1, &w, &h);
+    matrix->fillRect(x1, y1, w, h, to565(0, 0, 0));
+  }
+
+  matrix->setTextColor(fgColor);
+  matrix->setCursor(textX, textY);
+  matrix->print(currentText);
+
+  Serial.print("Text drawn: \"");
+  Serial.print(currentText);
+  Serial.print("\" at ");
+  Serial.print(textX);
+  Serial.print(",");
+  Serial.print(textY);
+  Serial.print(" size=");
+  Serial.print(textSize);
+  Serial.print(" fg=");
+  Serial.print(textRed);
+  Serial.print(",");
+  Serial.print(textGreen);
+  Serial.print(",");
+  Serial.print(textBlue);
+  Serial.print(" bgbox=");
+  Serial.println(textBackgroundBox ? "on" : "off");
+}
+
+void redrawTextIfEnabled() {
+  if (autoTextRedraw) {
+    drawConfiguredText();
+  }
 }
 
 void stopPlasma() {
@@ -305,13 +362,91 @@ void loop() {
       if (command == "r") {
         command = "rainbow 1";
       } else {
-        Serial.println("Use x<number>[r|g|b|w], y<number>[r|g|b|w], p<x>,<y>[r|g|b|w], full[r|g|b|w], b<number>, or rainbow 1/2/3/4");
+        Serial.println("Use x/y/p/full/b/rainbow commands, or txt/tx/ty/ts/tfg/tbg/drawtext");
         return;
       }
     }
 
     if (command == "rainbow 1" || command == "rainbow 2" || command == "rainbow 3" || command == "rainbow 4") {
       setPlasmaScene(command.charAt(command.length() - 1) - '0');
+      return;
+    }
+
+    if (command.startsWith("txt ")) {
+      currentText = command.substring(4);
+      Serial.print("Text set to: ");
+      Serial.println(currentText);
+      redrawTextIfEnabled();
+      return;
+    }
+
+    if (command.startsWith("tx ")) {
+      textX = command.substring(3).toInt();
+      Serial.print("Text X set to ");
+      Serial.println(textX);
+      redrawTextIfEnabled();
+      return;
+    }
+
+    if (command.startsWith("ty ")) {
+      textY = command.substring(3).toInt();
+      Serial.print("Text Y set to ");
+      Serial.println(textY);
+      redrawTextIfEnabled();
+      return;
+    }
+
+    if (command.startsWith("ts ")) {
+      int value = command.substring(3).toInt();
+      if (value < 1) {
+        Serial.println("Text size must be >= 1");
+      } else {
+        textSize = static_cast<uint8_t>(value);
+        Serial.print("Text size set to ");
+        Serial.println(textSize);
+        redrawTextIfEnabled();
+      }
+      return;
+    }
+
+    if (command.startsWith("tfg ")) {
+      String rgb = command.substring(4);
+      int firstComma = rgb.indexOf(',');
+      int secondComma = rgb.indexOf(',', firstComma + 1);
+      if (firstComma < 0 || secondComma < 0) {
+        Serial.println("Use tfg r,g,b for example tfg 255,255,255");
+        return;
+      }
+
+      textRed = static_cast<uint8_t>(rgb.substring(0, firstComma).toInt());
+      textGreen = static_cast<uint8_t>(rgb.substring(firstComma + 1, secondComma).toInt());
+      textBlue = static_cast<uint8_t>(rgb.substring(secondComma + 1).toInt());
+      Serial.print("Text color set to ");
+      Serial.print(textRed);
+      Serial.print(",");
+      Serial.print(textGreen);
+      Serial.print(",");
+      Serial.println(textBlue);
+      redrawTextIfEnabled();
+      return;
+    }
+
+    if (command == "tbg on") {
+      textBackgroundBox = true;
+      Serial.println("Text background box enabled");
+      redrawTextIfEnabled();
+      return;
+    }
+
+    if (command == "tbg off") {
+      textBackgroundBox = false;
+      Serial.println("Text background box disabled");
+      redrawTextIfEnabled();
+      return;
+    }
+
+    if (command == "drawtext") {
+      drawConfiguredText();
       return;
     }
 
@@ -366,7 +501,7 @@ void loop() {
         Serial.println("Row out of range. Use y0 to y63");
       }
     } else {
-      Serial.println("Use x<number>[r|g|b|w], y<number>[r|g|b|w], p<x>,<y>[r|g|b|w], full[r|g|b|w], b<number>, or rainbow 1/2/3/4");
+      Serial.println("Use x/y/p/full/b/rainbow commands, or txt/tx/ty/ts/tfg/tbg/drawtext");
     }
   }
 
