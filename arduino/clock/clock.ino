@@ -32,6 +32,7 @@
 #define MAX_TEXT_ELEMENTS 16
 #define TEXT_CONTENT_CAPACITY 32
 #define SERIAL_LINE_CAPACITY 128
+#define DEFAULT_BLINK_INTERVAL_MS 1000
 
 MatrixPanel_I2S_DMA* matrix = nullptr;
 
@@ -44,6 +45,7 @@ struct TextStyle {
   uint8_t blue;
   bool backgroundBox;
   bool visible;
+  bool blink;
 };
 
 struct TextElement {
@@ -56,6 +58,7 @@ struct TextElement {
 
 struct SceneState {
   uint8_t brightness;
+  unsigned long blinkIntervalMs;
   TextElement textElements[MAX_TEXT_ELEMENTS];
   uint16_t nextTextElementId;
   uint16_t nextDrawOrder;
@@ -110,7 +113,7 @@ void presentFrame() {
 }
 
 TextStyle defaultTextStyle() {
-  TextStyle style = {0, 0, 1, 255, 255, 255, false, true};
+  TextStyle style = {0, 0, 1, 255, 255, 255, false, true, false};
   return style;
 }
 
@@ -147,6 +150,7 @@ void resetTextElement(TextElement& element) {
 
 void initScene() {
   scene.brightness = PANEL_BRIGHTNESS;
+  scene.blinkIntervalMs = DEFAULT_BLINK_INTERVAL_MS;
   scene.nextTextElementId = 1;
   scene.nextDrawOrder = 1;
 
@@ -302,13 +306,53 @@ bool setTextElementField(uint16_t id, const char* field, const char* value) {
     return true;
   }
 
+  if (strcmp(field, "blink") == 0) {
+    int parsed;
+    if (!parseBool01(value, parsed)) {
+      Serial.println("Invalid blink. Use 0 or 1");
+      return false;
+    }
+    element->style.blink = (parsed == 1);
+    return true;
+  }
+
   Serial.print("Unknown field: ");
   Serial.println(field);
   return false;
 }
 
-void drawTextElement(const TextElement& element) {
+bool blinkPhaseIsVisible(unsigned long nowMs) {
+  if (scene.blinkIntervalMs == 0) {
+    return true;
+  }
+
+  return ((nowMs / scene.blinkIntervalMs) % 2UL) == 0;
+}
+
+bool hasBlinkingText() {
+  for (uint8_t i = 0; i < MAX_TEXT_ELEMENTS; i++) {
+    if (scene.textElements[i].allocated && scene.textElements[i].style.blink) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+bool shouldDrawTextElement(const TextElement& element, unsigned long nowMs) {
   if (!element.allocated || !element.style.visible || element.content[0] == '\0') {
+    return false;
+  }
+
+  if (element.style.blink && !blinkPhaseIsVisible(nowMs)) {
+    return false;
+  }
+
+  return true;
+}
+
+void drawTextElement(const TextElement& element, unsigned long nowMs) {
+  if (!shouldDrawTextElement(element, nowMs)) {
     return;
   }
 
@@ -372,6 +416,7 @@ int findNextDrawOrderElement(int lastDrawOrder) {
 
 void renderScene() {
   clearScreen();
+  unsigned long nowMs = millis();
 
   int lastDrawOrder = -1;
   while (true) {
@@ -380,7 +425,7 @@ void renderScene() {
       break;
     }
 
-    drawTextElement(scene.textElements[index]);
+    drawTextElement(scene.textElements[index], nowMs);
     lastDrawOrder = scene.textElements[index].drawOrder;
   }
 
@@ -408,6 +453,8 @@ void printTextElement(const TextElement& element) {
   Serial.print(element.style.backgroundBox ? 1 : 0);
   Serial.print(" vis=");
   Serial.print(element.style.visible ? 1 : 0);
+  Serial.print(" blink=");
+  Serial.print(element.style.blink ? 1 : 0);
   Serial.print(" text=\"");
   Serial.print(element.content);
   Serial.println("\"");
@@ -417,6 +464,7 @@ void printHelp() {
   Serial.println("Commands:");
   Serial.println("  help");
   Serial.println("  b <0-255>");
+  Serial.println("  blink <milliseconds>");
   Serial.println("  clear");
   Serial.println("  list");
   Serial.println("  get <id>");
@@ -424,9 +472,10 @@ void printHelp() {
   Serial.println("  td <id>");
   Serial.println("  tc <id> \"text\"");
   Serial.println("  ts <id> <field> <value>");
-  Serial.println("Fields: x, y, size, rgb, bg, vis");
+  Serial.println("Fields: x, y, size, rgb, bg, vis, blink");
   Serial.println("Examples:");
   Serial.println("  b 64");
+  Serial.println("  blink 1000");
   Serial.println("  ta 2 12 1 255,255,255 0 \"12:34\"");
   Serial.println("  ts 1 rgb 255,0,0");
   Serial.println("  tc 1 \"HELLO WORLD\"");
@@ -586,6 +635,19 @@ bool setBrightnessLevel(int value) {
   return true;
 }
 
+bool setBlinkInterval(unsigned long intervalMs) {
+  if (intervalMs == 0) {
+    Serial.println("Blink interval must be at least 1 millisecond");
+    return false;
+  }
+
+  scene.blinkIntervalMs = intervalMs;
+  Serial.print("Blink interval set to ");
+  Serial.print(scene.blinkIntervalMs);
+  Serial.println(" ms");
+  return true;
+}
+
 void handleHelpCommand(int tokenCount) {
   if (tokenCount != 1) {
     Serial.println("Usage: help");
@@ -608,6 +670,23 @@ void handleBrightnessCommand(int tokenCount, char* tokens[]) {
   }
 
   if (setBrightnessLevel(static_cast<int>(value))) {
+    renderScene();
+  }
+}
+
+void handleBlinkCommand(int tokenCount, char* tokens[]) {
+  if (tokenCount != 2) {
+    Serial.println("Usage: blink <milliseconds>");
+    return;
+  }
+
+  long value;
+  if (!parseInt32(tokens[1], value) || value < 1) {
+    Serial.println("Invalid blink interval. Use an integer from 1 and up");
+    return;
+  }
+
+  if (setBlinkInterval(static_cast<unsigned long>(value))) {
     renderScene();
   }
 }
@@ -838,6 +917,11 @@ void processCommandLine(char* line) {
     return;
   }
 
+  if (strcmp(tokens[0], "blink") == 0) {
+    handleBlinkCommand(tokenCount, tokens);
+    return;
+  }
+
   if (strcmp(tokens[0], "clear") == 0) {
     handleClearCommand(tokenCount);
     return;
@@ -911,6 +995,64 @@ void pollSerialCommands() {
   }
 }
 
+void updateBlinkingText() {
+  static bool lastBlinkVisible = true;
+
+  if (!hasBlinkingText()) {
+    return;
+  }
+
+  bool currentBlinkVisible = blinkPhaseIsVisible(millis());
+  if (currentBlinkVisible == lastBlinkVisible) {
+    return;
+  }
+
+  lastBlinkVisible = currentBlinkVisible;
+  renderScene();
+}
+
+void createStartupClockScene() {
+  TextStyle startupStyle = defaultTextStyle();
+  startupStyle.size = 2;
+
+  int16_t fullX1;
+  int16_t fullY1;
+  uint16_t fullW;
+  uint16_t fullH;
+  measureText("12:34", startupStyle, fullX1, fullY1, fullW, fullH);
+
+  int16_t hoursX1;
+  int16_t hoursY1;
+  uint16_t hoursW;
+  uint16_t hoursH;
+  measureText("12", startupStyle, hoursX1, hoursY1, hoursW, hoursH);
+
+  int16_t colonX1;
+  int16_t colonY1;
+  uint16_t colonW;
+  uint16_t colonH;
+  measureText(":", startupStyle, colonX1, colonY1, colonW, colonH);
+
+  int16_t groupCursorX = (PANEL_WIDTH - static_cast<int16_t>(fullW)) / 2 - fullX1;
+  int16_t groupCursorY = (PANEL_HEIGHT - static_cast<int16_t>(fullH)) / 2 - fullY1;
+
+  TextStyle hoursStyle = startupStyle;
+  hoursStyle.x = groupCursorX;
+  hoursStyle.y = groupCursorY;
+  createTextElement("12", hoursStyle, nullptr);
+
+  TextStyle colonStyle = startupStyle;
+  colonStyle.x = groupCursorX + static_cast<int16_t>(hoursW);
+  colonStyle.y = groupCursorY;
+  colonStyle.blink = true;
+  createTextElement(":", colonStyle, nullptr);
+
+  TextStyle minutesStyle = startupStyle;
+  minutesStyle.x = colonStyle.x + static_cast<int16_t>(colonW);
+  minutesStyle.y = groupCursorY;
+  createTextElement("34", minutesStyle, nullptr);
+}
+
 void setup() {
   initScene();
 
@@ -925,11 +1067,7 @@ void setup() {
     return;
   }
 
-  TextStyle startupStyle = defaultTextStyle();
-  startupStyle.size = 2;
-  centerTextStyleForContent("12:34", startupStyle);
-  createTextElement("12:34", startupStyle, nullptr);
-
+  createStartupClockScene();
   renderScene();
   Serial.println("Matrix init OK");
   Serial.print("Driver mode: ");
@@ -940,10 +1078,14 @@ void setup() {
   Serial.println(MATRIX_LAT_BLANKING);
   Serial.print("Brightness: ");
   Serial.println(scene.brightness);
+  Serial.print("Blink interval: ");
+  Serial.print(scene.blinkIntervalMs);
+  Serial.println(" ms");
   printHelp();
 }
 
 void loop() {
   pollSerialCommands();
+  updateBlinkingText();
   delay(5);
 }
