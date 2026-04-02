@@ -37,6 +37,7 @@
 #define DEFAULT_BLINK_INTERVAL_MS 1000
 #define DEFAULT_SCROLL_SPEED_PX_PER_SEC 10
 #define DEFAULT_SCROLL_PAUSE_MS 1000
+#define DEFAULT_SCROLL_GAP_PX 8
 
 enum ScrollMode : uint8_t {
   SCROLL_MODE_BOUNCE = 0,
@@ -75,6 +76,7 @@ struct TextElement {
   ScrollMode scrollMode;
   uint16_t scrollSpeedPxPerSec;
   unsigned long scrollPauseMs;
+  uint16_t scrollGapPx;
   float scrollOffsetPx;
   int8_t scrollDirection;
   unsigned long scrollPauseUntilMs;
@@ -427,6 +429,7 @@ void resetTextElement(TextElement& element) {
   element.scrollMode = SCROLL_MODE_BOUNCE;
   element.scrollSpeedPxPerSec = DEFAULT_SCROLL_SPEED_PX_PER_SEC;
   element.scrollPauseMs = DEFAULT_SCROLL_PAUSE_MS;
+  element.scrollGapPx = DEFAULT_SCROLL_GAP_PX;
   resetTextAnimation(element);
 }
 
@@ -650,6 +653,7 @@ uint16_t createTextElement(const char* content, const TextStyle& style, bool* tr
   element.scrollMode = SCROLL_MODE_BOUNCE;
   element.scrollSpeedPxPerSec = DEFAULT_SCROLL_SPEED_PX_PER_SEC;
   element.scrollPauseMs = DEFAULT_SCROLL_PAUSE_MS;
+  element.scrollGapPx = DEFAULT_SCROLL_GAP_PX;
   resetTextAnimation(element);
   return element.id;
 }
@@ -739,6 +743,26 @@ bool shouldDrawTextElement(const TextElement& element, unsigned long nowMs) {
   return true;
 }
 
+bool shouldDrawLoopFollower(const TextElement& element, const Zone& zone) {
+  if (!element.scrollEnabled || element.scrollMode != SCROLL_MODE_LOOP || element.content[0] == '\0') {
+    return false;
+  }
+
+  TextMetrics localMetrics = getTextMetrics(element, element.style.x, element.style.y);
+  return static_cast<int16_t>(localMetrics.width) > zone.width;
+}
+
+void drawTextGlyphsAt(const TextElement& element, int16_t drawX, int16_t drawY) {
+  if (element.style.backgroundBox) {
+    TextMetrics metrics = getTextMetrics(element, drawX, drawY);
+    matrix->fillRect(metrics.x1, metrics.y1, metrics.width, metrics.height, to565(0, 0, 0));
+  }
+
+  matrix->setTextColor(to565(element.style.red, element.style.green, element.style.blue));
+  matrix->setCursor(drawX, drawY);
+  matrix->print(element.content);
+}
+
 bool updateTextScrollState(TextElement& element, unsigned long nowMs) {
   if (!element.allocated || !element.scrollEnabled || !textHasZone(element) || element.content[0] == '\0') {
     bool changed = fabsf(element.scrollOffsetPx) > 0.01f || element.scrollPauseUntilMs != 0;
@@ -786,9 +810,12 @@ bool updateTextScrollState(TextElement& element, unsigned long nowMs) {
   float newOffset = element.scrollOffsetPx + static_cast<float>(element.scrollDirection) * static_cast<float>(element.scrollSpeedPxPerSec) * deltaSeconds;
 
   if (element.scrollMode == SCROLL_MODE_LOOP) {
-    float resetOffset = static_cast<float>(zone->width - textLeftBase);
-    if (static_cast<float>(textLeftBase + textWidth) + newOffset <= 0.0f) {
-      newOffset = resetOffset;
+    float period = static_cast<float>(textWidth + static_cast<int16_t>(element.scrollGapPx));
+    while (newOffset <= -period) {
+      newOffset += period;
+    }
+    while (newOffset > 0.0f) {
+      newOffset -= period;
     }
     element.scrollOffsetPx = newOffset;
     return fabsf(oldOffset - element.scrollOffsetPx) > 0.01f;
@@ -838,15 +865,17 @@ void drawTextElement(const TextElement& element, unsigned long nowMs) {
   matrix->setTextWrap(false);
   matrix->setTextSize(element.style.size);
   applyClipForText(element);
+  drawTextGlyphsAt(element, drawX, drawY);
 
-  if (element.style.backgroundBox) {
-    TextMetrics metrics = getTextMetrics(element, drawX, drawY);
-    matrix->fillRect(metrics.x1, metrics.y1, metrics.width, metrics.height, to565(0, 0, 0));
+  if (textHasZone(element)) {
+    const Zone* zone = getZone(element.zoneId);
+    if (zone != nullptr && shouldDrawLoopFollower(element, *zone)) {
+      TextMetrics localMetrics = getTextMetrics(element, element.style.x, element.style.y);
+      int16_t followerDrawX = drawX + static_cast<int16_t>(localMetrics.width) + static_cast<int16_t>(element.scrollGapPx);
+      drawTextGlyphsAt(element, followerDrawX, drawY);
+    }
   }
 
-  matrix->setTextColor(to565(element.style.red, element.style.green, element.style.blue));
-  matrix->setCursor(drawX, drawY);
-  matrix->print(element.content);
   clearClipForText();
 }
 
@@ -933,6 +962,8 @@ void printTextElement(const TextElement& element) {
   Serial.print(element.scrollSpeedPxPerSec);
   Serial.print(" scroll_pause=");
   Serial.print(element.scrollPauseMs);
+  Serial.print(" scroll_gap=");
+  Serial.print(element.scrollGapPx);
   Serial.print(" text=\"");
   Serial.print(element.content);
   Serial.println("\"");
@@ -955,7 +986,7 @@ void printHelp() {
   Serial.println("  zg <zoneId>");
   Serial.println("  zlist");
   Serial.println("  zs <zoneId> <field> <value>");
-  Serial.println("Text fields: x, y, size, rgb, bg, vis, blink, text, zone, scroll, scroll_mode, scroll_speed, scroll_pause");
+  Serial.println("Text fields: x, y, size, rgb, bg, vis, blink, text, zone, scroll, scroll_mode, scroll_speed, scroll_pause, scroll_gap");
   Serial.println("Zone fields: x, y, w, h");
   Serial.println("Examples:");
   Serial.println("  za 0 56 64 8");
@@ -964,6 +995,7 @@ void printHelp() {
   Serial.println("  ts 4 scroll_mode bounce");
   Serial.println("  ts 4 scroll_pause 1000");
   Serial.println("  ts 4 scroll_mode loop");
+  Serial.println("  ts 4 scroll_gap 8");
 }
 
 bool setBrightnessLevel(int value) {
@@ -1143,6 +1175,16 @@ bool setTextElementField(uint16_t id, const char* field, const char* value) {
       return false;
     }
     element->scrollPauseMs = static_cast<unsigned long>(parsed);
+    resetTextAnimation(*element);
+    return true;
+  }
+
+  if (strcmp(field, "scroll_gap") == 0) {
+    if (!parseInt32(value, parsed) || parsed < 0 || parsed > 65535) {
+      Serial.println("Invalid scroll_gap. Use an integer from 0 to 65535");
+      return false;
+    }
+    element->scrollGapPx = static_cast<uint16_t>(parsed);
     resetTextAnimation(*element);
     return true;
   }
