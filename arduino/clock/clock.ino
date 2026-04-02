@@ -1,7 +1,6 @@
 #include <ESP32-HUB75-MatrixPanel-I2S-DMA.h>
-#include <WiFi.h>
 #include "clock_config.h"
-#include <time.h>
+#include "network_time.h"
 #include <ctype.h>
 #include <limits.h>
 #include <math.h>
@@ -41,11 +40,6 @@
 #define DEFAULT_SCROLL_SPEED_PX_PER_SEC 10
 #define DEFAULT_SCROLL_PAUSE_MS 1000
 #define DEFAULT_SCROLL_GAP_PX 8
-#define WIFI_CONNECT_TIMEOUT_MS 20000
-#define WIFI_STATUS_INTERVAL_MS 500
-#define INITIAL_TIME_SYNC_TIMEOUT_MS 10000
-#define TIME_SYNC_RETRY_INTERVAL_MS 60000
-
 enum ScrollMode : uint8_t {
   SCROLL_MODE_BOUNCE = 0,
   SCROLL_MODE_LOOP = 1
@@ -94,9 +88,7 @@ struct SceneState {
   uint8_t brightness;
   unsigned long blinkIntervalMs;
   bool lastBlinkVisible;
-  bool wifiConnected;
-  bool timeSynced;
-  unsigned long lastTimeSyncAttemptMs;
+  uint16_t clockDateId;
   uint16_t clockHoursId;
   uint16_t clockMinutesId;
   Zone zones[MAX_ZONES];
@@ -265,6 +257,7 @@ private:
 
 ClippedMatrixPanel* matrix = nullptr;
 SceneState scene;
+NetworkTimeState networkTime;
 char serialLineBuffer[SERIAL_LINE_CAPACITY];
 size_t serialLineLength = 0;
 
@@ -449,14 +442,14 @@ void initScene() {
   scene.brightness = PANEL_BRIGHTNESS;
   scene.blinkIntervalMs = DEFAULT_BLINK_INTERVAL_MS;
   scene.lastBlinkVisible = true;
-  scene.wifiConnected = false;
-  scene.timeSynced = false;
-  scene.lastTimeSyncAttemptMs = 0;
+  scene.clockDateId = 0;
   scene.clockHoursId = 0;
   scene.clockMinutesId = 0;
   scene.nextZoneId = 1;
   scene.nextTextElementId = 1;
   scene.nextDrawOrder = 1;
+
+  initNetworkTimeState(networkTime);
 
   for (uint8_t i = 0; i < MAX_ZONES; i++) {
     resetZone(scene.zones[i]);
@@ -471,8 +464,11 @@ void clearScene() {
   scene.nextZoneId = 1;
   scene.nextTextElementId = 1;
   scene.nextDrawOrder = 1;
+  scene.clockDateId = 0;
   scene.clockHoursId = 0;
   scene.clockMinutesId = 0;
+
+  initNetworkTimeState(networkTime);
 
   for (uint8_t i = 0; i < MAX_ZONES; i++) {
     resetZone(scene.zones[i]);
@@ -1017,88 +1013,47 @@ void printHelp() {
   Serial.println("  ts 4 scroll_gap 8");
 }
 
-bool isWifiConnected() {
-  return WiFi.status() == WL_CONNECTED;
-}
-
-bool connectToWifi() {
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-
-  Serial.print("Connecting to Wi-Fi SSID ");
-  Serial.println(WIFI_SSID);
-
-  unsigned long startMs = millis();
-  unsigned long lastStatusMs = 0;
-
-  while (!isWifiConnected() && millis() - startMs < WIFI_CONNECT_TIMEOUT_MS) {
-    unsigned long nowMs = millis();
-    if (nowMs - lastStatusMs >= WIFI_STATUS_INTERVAL_MS) {
-      Serial.print(".");
-      lastStatusMs = nowMs;
-    }
-    delay(50);
-  }
-
-  Serial.println();
-
-  if (!isWifiConnected()) {
-    Serial.println("Wi-Fi connection failed");
-    return false;
-  }
-
-  Serial.println("Wi-Fi connected");
-  Serial.print("IP address: ");
-  Serial.println(WiFi.localIP());
-  Serial.print("RSSI: ");
-  Serial.println(WiFi.RSSI());
-  scene.wifiConnected = true;
-  return true;
-}
-
-bool syncTimeFromInternet() {
-  if (!isWifiConnected()) {
-    Serial.println("Cannot sync time without Wi-Fi");
-    scene.timeSynced = false;
-    return false;
-  }
-
-  scene.lastTimeSyncAttemptMs = millis();
-  configTzTime(TIME_ZONE, NTP_SERVER_1, NTP_SERVER_2);
-  Serial.println("Syncing time from NTP...");
-
-  struct tm timeInfo;
-  if (!getLocalTime(&timeInfo, INITIAL_TIME_SYNC_TIMEOUT_MS)) {
-    Serial.println("Initial NTP sync failed");
-    scene.timeSynced = false;
-    return false;
-  }
-
-  scene.timeSynced = true;
-  Serial.print("Time synced: ");
-  Serial.println(&timeInfo, "%H:%M:%S %d/%m/%Y");
-  return true;
-}
-
 bool updateClockDisplayFromRtc() {
-  if (scene.clockHoursId == 0 || scene.clockMinutesId == 0) {
+  if (scene.clockDateId == 0 || scene.clockHoursId == 0 || scene.clockMinutesId == 0) {
     return false;
   }
 
-  struct tm timeInfo;
-  if (!getLocalTime(&timeInfo, 10)) {
-    scene.timeSynced = false;
+  tm timeInfo;
+  if (!readCurrentLocalTime(networkTime, timeInfo, 10)) {
     return false;
   }
-
-  scene.timeSynced = true;
 
   char hoursText[3];
   char minutesText[3];
+  char dateText[16];
   snprintf(hoursText, sizeof(hoursText), "%02d", timeInfo.tm_hour);
   snprintf(minutesText, sizeof(minutesText), "%02d", timeInfo.tm_min);
+  static const char* WEEKDAY_NAMES[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+  static const char* MONTH_NAMES[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+  snprintf(
+      dateText,
+      sizeof(dateText),
+      "%s %s %d",
+      WEEKDAY_NAMES[timeInfo.tm_wday],
+      MONTH_NAMES[timeInfo.tm_mon],
+      timeInfo.tm_mday);
 
   bool changed = false;
+  const TextElement* dateElement = getTextElement(scene.clockDateId);
+  if (dateElement != nullptr) {
+    if (strcmp(dateElement->content, dateText) != 0) {
+      setTextElementContent(scene.clockDateId, dateText, nullptr);
+      changed = true;
+    }
+
+    TextMetrics dateMetrics = measureTextAt(dateText, dateElement->style.size, 0, dateElement->style.y);
+    int16_t centeredX = (PANEL_WIDTH - static_cast<int16_t>(dateMetrics.width)) / 2 - dateMetrics.x1;
+    if (dateElement->style.x != centeredX) {
+      findTextElementById(scene.clockDateId)->style.x = centeredX;
+      changed = true;
+    }
+  }
+
   const TextElement* hoursElement = getTextElement(scene.clockHoursId);
   if (hoursElement != nullptr && strcmp(hoursElement->content, hoursText) != 0) {
     setTextElementContent(scene.clockHoursId, hoursText, nullptr);
@@ -1113,22 +1068,6 @@ bool updateClockDisplayFromRtc() {
 
   return changed;
 }
-
-void maintainTimeSync() {
-  if (!scene.wifiConnected || scene.timeSynced) {
-    return;
-  }
-
-  unsigned long nowMs = millis();
-  if (nowMs - scene.lastTimeSyncAttemptMs < TIME_SYNC_RETRY_INTERVAL_MS) {
-    return;
-  }
-
-  if (syncTimeFromInternet()) {
-    renderScene();
-  }
-}
-
 bool setBrightnessLevel(int value) {
   if (value < 0 || value > 255) {
     Serial.println("Brightness out of range. Use 0 to 255");
@@ -1817,6 +1756,10 @@ void pollSerialCommands() {
 }
 
 void createStartupClockScene() {
+  TextStyle dateStyle = defaultTextStyle();
+  dateStyle.size = 1;
+  TextMetrics dateMetrics = measureTextAt("___ ___ __", dateStyle.size, 0, 0);
+
   TextStyle clockStyle = defaultTextStyle();
   clockStyle.size = 2;
 
@@ -1826,6 +1769,13 @@ void createStartupClockScene() {
 
   int16_t groupX = (PANEL_WIDTH - static_cast<int16_t>(fullMetrics.width)) / 2 - fullMetrics.x1;
   int16_t groupY = (PANEL_HEIGHT - static_cast<int16_t>(fullMetrics.height)) / 2 - fullMetrics.y1;
+
+  dateStyle.x = (PANEL_WIDTH - static_cast<int16_t>(dateMetrics.width)) / 2 - dateMetrics.x1;
+  dateStyle.y = groupY - static_cast<int16_t>(dateMetrics.height) - 2;
+  if (dateStyle.y < 0) {
+    dateStyle.y = 0;
+  }
+  scene.clockDateId = createTextElement("___ ___ __", dateStyle, nullptr);
 
   TextStyle hoursStyle = clockStyle;
   hoursStyle.x = groupX;
@@ -1845,19 +1795,19 @@ void createStartupClockScene() {
 
   TextStyle footerStyle = defaultTextStyle();
   footerStyle.size = 1;
-  TextMetrics footerMetrics = measureTextAt("x.com/bendesprets", footerStyle.size, 0, 0);
+  TextMetrics footerMetrics = measureTextAt("desprets.net", footerStyle.size, 0, 0);
   int16_t footerZoneHeight = static_cast<int16_t>(footerMetrics.height);
   int16_t footerZoneY = PANEL_HEIGHT - footerZoneHeight;
   uint16_t footerZoneId = createZone(0, footerZoneY, PANEL_WIDTH, footerZoneHeight);
 
-  uint16_t footerId = createTextElement("x.com/bendesprets", footerStyle, nullptr);
+  uint16_t footerId = createTextElement("desprets.net", footerStyle, nullptr);
   TextElement* footer = findTextElementById(footerId);
   if (footer != nullptr) {
     footer->zoneId = footerZoneId;
     footer->style.x = 0;
     footer->style.y = footerZoneHeight - static_cast<int16_t>(footerMetrics.height) - footerMetrics.y1;
     footer->scrollEnabled = true;
-    footer->scrollMode = SCROLL_MODE_LOOP;
+    footer->scrollMode = SCROLL_MODE_BOUNCE;
     footer->scrollSpeedPxPerSec = DEFAULT_SCROLL_SPEED_PX_PER_SEC;
     footer->scrollPauseMs = DEFAULT_SCROLL_PAUSE_MS;
     resetTextAnimation(*footer);
@@ -1893,18 +1843,12 @@ void setup() {
   Serial.print("Blink interval: ");
   Serial.print(scene.blinkIntervalMs);
   Serial.println(" ms");
-  connectToWifi();
-  if (scene.wifiConnected) {
-    syncTimeFromInternet();
-    updateClockDisplayFromRtc();
-    renderScene();
-  }
   printHelp();
 }
 
 void loop() {
   pollSerialCommands();
-  maintainTimeSync();
+  maintainTimeSync(networkTime);
   if (updateClockDisplayFromRtc()) {
     renderScene();
   }
