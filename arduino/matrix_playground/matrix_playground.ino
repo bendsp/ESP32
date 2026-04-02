@@ -34,7 +34,7 @@ unsigned long fpsTimer = 0;
 bool plasmaEnabled = false;
 uint8_t currentScene = 1;
 CRGB currentColor;
-CRGBPalette16 palettes[] = {RainbowColors_p, RainbowStripeColors_p, OceanColors_p, CloudColors_p};
+CRGBPalette16 palettes[] = {RainbowColors_p, RainbowStripeColors_p, HeatColors_p, CloudColors_p};
 CRGBPalette16 currentPalette = palettes[0];
 String currentText = "HELLO";
 int16_t textX = 2;
@@ -45,6 +45,7 @@ uint8_t textGreen = 255;
 uint8_t textBlue = 255;
 bool textBackgroundBox = false;
 bool autoTextRedraw = true;
+bool textSticky = false;
 
 bool beginMatrix() {
   HUB75_I2S_CFG::i2s_pins pins = {
@@ -59,7 +60,9 @@ bool beginMatrix() {
     PANEL_HEIGHT,
     PANELS_NUMBER,
     pins,
-    MATRIX_DRIVER
+    MATRIX_DRIVER,
+    HUB75_I2S_CFG::TYPE138,
+    true
   );
 
   config.mx_height = PANEL_HEIGHT;
@@ -79,6 +82,10 @@ bool beginMatrix() {
 
 void clearScreen() {
   matrix->fillScreenRGB888(0, 0, 0);
+}
+
+void presentFrame() {
+  matrix->flipDMABuffer();
 }
 
 void fillSolid(uint8_t red, uint8_t green, uint8_t blue) {
@@ -189,6 +196,7 @@ void colorFromCode(char code, uint8_t& red, uint8_t& green, uint8_t& blue) {
 void showFull(uint8_t red, uint8_t green, uint8_t blue) {
   clearScreen();
   fillSolid(red, green, blue);
+  presentFrame();
   Serial.print("Showing full screen color=");
   Serial.println((red == 255 && green == 0 && blue == 0) ? "r" :
                  (red == 0 && green == 255 && blue == 0) ? "g" :
@@ -211,9 +219,7 @@ uint16_t to565(uint8_t red, uint8_t green, uint8_t blue) {
   return matrix->color565(red, green, blue);
 }
 
-void drawConfiguredText() {
-  stopPlasma();
-  clearScreen();
+void drawConfiguredTextOverlay() {
   matrix->setTextWrap(false);
   matrix->setTextSize(textSize);
 
@@ -232,26 +238,38 @@ void drawConfiguredText() {
   matrix->setCursor(textX, textY);
   matrix->print(currentText);
 
-  Serial.print("Text drawn: \"");
-  Serial.print(currentText);
-  Serial.print("\" at ");
-  Serial.print(textX);
-  Serial.print(",");
-  Serial.print(textY);
-  Serial.print(" size=");
-  Serial.print(textSize);
-  Serial.print(" fg=");
-  Serial.print(textRed);
-  Serial.print(",");
-  Serial.print(textGreen);
-  Serial.print(",");
-  Serial.print(textBlue);
-  Serial.print(" bgbox=");
-  Serial.println(textBackgroundBox ? "on" : "off");
+  if (!textSticky) {
+    Serial.print("Text drawn: \"");
+    Serial.print(currentText);
+    Serial.print("\" at ");
+    Serial.print(textX);
+    Serial.print(",");
+    Serial.print(textY);
+    Serial.print(" size=");
+    Serial.print(textSize);
+    Serial.print(" fg=");
+    Serial.print(textRed);
+    Serial.print(",");
+    Serial.print(textGreen);
+    Serial.print(",");
+    Serial.print(textBlue);
+    Serial.print(" bgbox=");
+    Serial.println(textBackgroundBox ? "on" : "off");
+  }
+}
+
+void drawConfiguredText() {
+  stopPlasma();
+  clearScreen();
+  drawConfiguredTextOverlay();
+  presentFrame();
 }
 
 void redrawTextIfEnabled() {
   if (autoTextRedraw) {
+    if (textSticky) {
+      return;
+    }
     drawConfiguredText();
   }
 }
@@ -308,12 +326,19 @@ void renderPlasmaFrame() {
     fpsTimer = millis();
     fps = 0;
   }
+
+  if (textSticky) {
+    drawConfiguredTextOverlay();
+  }
+
+  presentFrame();
 }
 
 void showRow(int16_t y, uint8_t red, uint8_t green, uint8_t blue) {
   stopPlasma();
   clearScreen();
   drawHorizontalLineSafe(y, red, green, blue);
+  presentFrame();
   Serial.print("Showing logical row y=");
   Serial.print(y);
   Serial.print(" color=");
@@ -326,6 +351,7 @@ void showColumn(int16_t x, uint8_t red, uint8_t green, uint8_t blue) {
   stopPlasma();
   clearScreen();
   drawVerticalLineSafe(x, red, green, blue);
+  presentFrame();
   Serial.print("Showing logical column x=");
   Serial.print(x);
   Serial.print(" color=");
@@ -343,6 +369,7 @@ void showPixel(int16_t x, int16_t y, uint8_t red, uint8_t green, uint8_t blue) {
   stopPlasma();
   clearScreen();
   drawPixelSafe(x, y, red, green, blue);
+  presentFrame();
   Serial.print("Showing logical pixel x=");
   Serial.print(x);
   Serial.print(" y=");
@@ -442,6 +469,21 @@ void loop() {
       textBackgroundBox = false;
       Serial.println("Text background box disabled");
       redrawTextIfEnabled();
+      return;
+    }
+
+    if (command == "tsticky on") {
+      textSticky = true;
+      Serial.println("Sticky text overlay enabled");
+      if (!plasmaEnabled) {
+        drawConfiguredText();
+      }
+      return;
+    }
+
+    if (command == "tsticky off") {
+      textSticky = false;
+      Serial.println("Sticky text overlay disabled");
       return;
     }
 
