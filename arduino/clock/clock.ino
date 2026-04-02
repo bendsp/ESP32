@@ -1,4 +1,6 @@
 #include <ESP32-HUB75-MatrixPanel-I2S-DMA.h>
+#include <WiFi.h>
+#include "clock_config.h"
 #include <ctype.h>
 #include <limits.h>
 #include <math.h>
@@ -38,6 +40,8 @@
 #define DEFAULT_SCROLL_SPEED_PX_PER_SEC 10
 #define DEFAULT_SCROLL_PAUSE_MS 1000
 #define DEFAULT_SCROLL_GAP_PX 8
+#define WIFI_CONNECT_TIMEOUT_MS 20000
+#define WIFI_STATUS_INTERVAL_MS 500
 
 enum ScrollMode : uint8_t {
   SCROLL_MODE_BOUNCE = 0,
@@ -998,6 +1002,44 @@ void printHelp() {
   Serial.println("  ts 4 scroll_gap 8");
 }
 
+bool isWifiConnected() {
+  return WiFi.status() == WL_CONNECTED;
+}
+
+bool connectToWifi() {
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+
+  Serial.print("Connecting to Wi-Fi SSID ");
+  Serial.println(WIFI_SSID);
+
+  unsigned long startMs = millis();
+  unsigned long lastStatusMs = 0;
+
+  while (!isWifiConnected() && millis() - startMs < WIFI_CONNECT_TIMEOUT_MS) {
+    unsigned long nowMs = millis();
+    if (nowMs - lastStatusMs >= WIFI_STATUS_INTERVAL_MS) {
+      Serial.print(".");
+      lastStatusMs = nowMs;
+    }
+    delay(50);
+  }
+
+  Serial.println();
+
+  if (!isWifiConnected()) {
+    Serial.println("Wi-Fi connection failed");
+    return false;
+  }
+
+  Serial.println("Wi-Fi connected");
+  Serial.print("IP address: ");
+  Serial.println(WiFi.localIP());
+  Serial.print("RSSI: ");
+  Serial.println(WiFi.RSSI());
+  return true;
+}
+
 bool setBrightnessLevel(int value) {
   if (value < 0 || value > 255) {
     Serial.println("Brightness out of range. Use 0 to 255");
@@ -1762,6 +1804,7 @@ void setup() {
   Serial.print("Blink interval: ");
   Serial.print(scene.blinkIntervalMs);
   Serial.println(" ms");
+  connectToWifi();
   printHelp();
 }
 
