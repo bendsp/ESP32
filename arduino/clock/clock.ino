@@ -70,6 +70,7 @@ size_t serialLineLength = 0;
 
 bool parseRgb(const char* text, int& red, int& green, int& blue);
 bool parseBool01(const char* text, int& value);
+bool setTextElementContent(uint16_t id, const char* content, bool* truncated);
 
 bool beginMatrix() {
   HUB75_I2S_CFG::i2s_pins pins = {
@@ -316,6 +317,19 @@ bool setTextElementField(uint16_t id, const char* field, const char* value) {
     return true;
   }
 
+  if (strcmp(field, "text") == 0) {
+    bool truncated = false;
+    if (!setTextElementContent(id, value, &truncated)) {
+      return false;
+    }
+    if (truncated) {
+      Serial.print("Text truncated to ");
+      Serial.print(TEXT_CONTENT_CAPACITY - 1);
+      Serial.println(" characters");
+    }
+    return true;
+  }
+
   Serial.print("Unknown field: ");
   Serial.println(field);
   return false;
@@ -470,15 +484,16 @@ void printHelp() {
   Serial.println("  get <id>");
   Serial.println("  ta <x> <y> <size> <r,g,b> <bg> \"text\"");
   Serial.println("  td <id>");
-  Serial.println("  tc <id> \"text\"");
+  Serial.println("  tc \"text\"");
   Serial.println("  ts <id> <field> <value>");
-  Serial.println("Fields: x, y, size, rgb, bg, vis, blink");
+  Serial.println("Fields: x, y, size, rgb, bg, vis, blink, text");
   Serial.println("Examples:");
   Serial.println("  b 64");
   Serial.println("  blink 1000");
   Serial.println("  ta 2 12 1 255,255,255 0 \"12:34\"");
   Serial.println("  ts 1 rgb 255,0,0");
-  Serial.println("  tc 1 \"HELLO WORLD\"");
+  Serial.println("  ts 1 text \"HELLO AGAIN\"");
+  Serial.println("  tc \"HELLO WORLD\"");
 }
 
 bool parseInt32(const char* text, long& value) {
@@ -837,25 +852,21 @@ void handleDeleteTextCommand(int tokenCount, char* tokens[]) {
 }
 
 void handleTextContentCommand(int tokenCount, char* tokens[]) {
-  if (tokenCount != 3) {
-    Serial.println("Usage: tc <id> \"text\"");
+  if (tokenCount != 2) {
+    Serial.println("Usage: tc \"text\"");
     return;
   }
 
-  uint16_t id;
-  if (!parseUInt16Value(tokens[1], id)) {
-    Serial.println("Invalid id");
-    return;
-  }
+  TextStyle style = defaultTextStyle();
 
   bool truncated = false;
-  if (!setTextElementContent(id, tokens[2], &truncated)) {
-    Serial.print("Text element not found: ");
-    Serial.println(id);
+  uint16_t id = createTextElement(tokens[1], style, &truncated);
+  if (id == 0) {
+    Serial.println("No free text element slots");
     return;
   }
 
-  Serial.print("Updated text for id=");
+  Serial.print("Created text element id=");
   Serial.println(id);
   if (truncated) {
     Serial.print("Text truncated to ");
