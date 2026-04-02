@@ -329,6 +329,24 @@ void drawTextElement(const TextElement& element) {
   matrix->print(element.content);
 }
 
+void measureText(const char* text, const TextStyle& style, int16_t& x1, int16_t& y1, uint16_t& w, uint16_t& h) {
+  matrix->setTextWrap(false);
+  matrix->setTextSize(style.size);
+  matrix->getTextBounds(text, style.x, style.y, &x1, &y1, &w, &h);
+}
+
+void centerTextStyleForContent(const char* text, TextStyle& style) {
+  int16_t x1;
+  int16_t y1;
+  uint16_t w;
+  uint16_t h;
+
+  measureText(text, style, x1, y1, w, h);
+
+  style.x += (PANEL_WIDTH - static_cast<int16_t>(w)) / 2 - x1;
+  style.y += (PANEL_HEIGHT - static_cast<int16_t>(h)) / 2 - y1;
+}
+
 int findNextDrawOrderElement(int lastDrawOrder) {
   int bestIndex = -1;
   int bestDrawOrder = INT_MAX;
@@ -906,6 +924,11 @@ void setup() {
     Serial.println("Matrix init failed");
     return;
   }
+
+  TextStyle startupStyle = defaultTextStyle();
+  startupStyle.size = 2;
+  centerTextStyleForContent("12:34", startupStyle);
+  createTextElement("12:34", startupStyle, nullptr);
 
   renderScene();
   Serial.println("Matrix init OK");
