@@ -17,6 +17,8 @@ That is why Arduino creates folders like `sketch_apr2a` by default. They are jus
 
 - `hello_serial`: first upload test, prints to the serial monitor once per second
 - `blink_builtin`: blinks the board's built-in LED and prints LED state to serial
+- `matrix_pattern_plasma`: vendor demo for the HUB75 matrix adapter and 64x64 panel
+- `matrix_playground`: minimal matrix setup with simple helper functions for experimentation
 
 ## Recommended Workflow
 
