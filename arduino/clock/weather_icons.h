@@ -26,6 +26,7 @@ static constexpr uint64_t CLOUD = 0x00007e818999710eULL;
 static constexpr uint64_t SHOWERS = 0x152a7e818191710eULL;
 static constexpr uint64_t SNOW = 0xa542a51818a542a5ULL;
 static constexpr uint64_t STORM = 0x0a04087e8191710eULL;
+static constexpr uint64_t MOON = 0x000e1c3838381c0eULL;
 static constexpr uint64_t UNKNOWN = 0x00004438006c6c00ULL;
 
 inline WeatherIconKind iconKindForWeatherCode(uint8_t weatherCode, bool isDay) {
@@ -93,7 +94,7 @@ inline void drawWeatherIcon(MatrixPanel_I2S_DMA* matrix, WeatherIconKind kind, i
       color = matrix->color565(255, 220, 0);
       break;
     case WEATHER_ICON_CLEAR_NIGHT:
-      icon = UNKNOWN;
+      icon = MOON;
       color = matrix->color565(120, 170, 255);
       break;
     case WEATHER_ICON_PARTLY_CLOUDY_DAY:
@@ -109,7 +110,7 @@ inline void drawWeatherIcon(MatrixPanel_I2S_DMA* matrix, WeatherIconKind kind, i
       color = matrix->color565(220, 220, 220);
       break;
     case WEATHER_ICON_FOG:
-      icon = UNKNOWN;
+      icon = CLOUD;
       color = matrix->color565(170, 170, 170);
       break;
     case WEATHER_ICON_RAIN:

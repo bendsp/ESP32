@@ -6,7 +6,7 @@ namespace {
 
 constexpr LayoutInsets kTopWidgetInsets = {1, 1, 1, 1};
 constexpr int16_t kTopSlotColumnSpan = 4;
-constexpr int16_t kClockBlockTopPadding = 4;
+constexpr int16_t kClockBlockTopY = 12;
 
 WidgetPlacement topSlotPlacement(bool rightSide) {
   uint8_t columnStart = rightSide ? kTopSlotColumnSpan : 0;
@@ -40,7 +40,7 @@ void placeTimeBlock(ClockFaceState& state, MatrixPanel_I2S_DMA* matrix) {
   TextMetrics colonMetrics = measureTextAt(matrix, ":", clockStyle.size, 0, 0);
 
   int16_t groupX = (kDisplayMatrixPanelWidth - static_cast<int16_t>(fullMetrics.width)) / 2 - fullMetrics.x1;
-  int16_t groupY = kLayoutTopRowHeight + kClockBlockTopPadding - fullMetrics.y1;
+  int16_t groupY = kClockBlockTopY - fullMetrics.y1;
 
   setTextElementPosition(state.scene, state.hoursTextId, groupX, groupY);
   setTextElementPosition(
