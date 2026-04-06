@@ -2,6 +2,7 @@
 #include "clock_config.h"
 #include "network_time.h"
 #include "weather.h"
+#include "weather_icons.h"
 #include <ctype.h>
 #include <esp_system.h>
 #include <limits.h>
@@ -45,19 +46,6 @@
 enum ScrollMode : uint8_t {
   SCROLL_MODE_BOUNCE = 0,
   SCROLL_MODE_LOOP = 1
-};
-
-enum WeatherIconKind : uint8_t {
-  WEATHER_ICON_NONE = 0,
-  WEATHER_ICON_CLEAR_DAY,
-  WEATHER_ICON_CLEAR_NIGHT,
-  WEATHER_ICON_PARTLY_CLOUDY_DAY,
-  WEATHER_ICON_PARTLY_CLOUDY_NIGHT,
-  WEATHER_ICON_CLOUDY,
-  WEATHER_ICON_FOG,
-  WEATHER_ICON_RAIN,
-  WEATHER_ICON_SNOW,
-  WEATHER_ICON_STORM
 };
 
 struct TextStyle {
@@ -994,118 +982,6 @@ int findNextDrawOrderElement(int lastDrawOrder) {
   return bestIndex;
 }
 
-void drawWeatherValue64(uint64_t value, int16_t x, int16_t y, uint16_t color) {
-  for (uint8_t row = 0; row < 8; row++) {
-    uint8_t rowBits = static_cast<uint8_t>((value >> (row * 8)) & 0xFFU);
-    for (uint8_t column = 0; column < 8; column++) {
-      if (((rowBits >> column) & 0x01U) == 0) {
-        continue;
-      }
-
-      matrix->drawPixel(x + column, y + row, color);
-    }
-  }
-}
-
-void drawWeatherIcon() {
-  // Icons taken from https://github.com/caternuson/rpi-weather/blob/master/led8x8icons.py
-  static constexpr uint64_t SUNNY_ICON = 0x9142183dbc184289ULL;
-  static constexpr uint64_t RAIN_ICON = 0x55aa55aa55aa55aaULL;
-  static constexpr uint64_t CLOUD_ICON = 0x00007e818999710eULL;
-  static constexpr uint64_t SHOWERS_ICON = 0x152a7e818191710eULL;
-  static constexpr uint64_t SNOW_ICON = 0xa542a51818a542a5ULL;
-  static constexpr uint64_t STORM_ICON = 0x0a04087e8191710eULL;
-  static constexpr uint64_t UNKNOWN_ICON = 0x00004438006c6c00ULL;
-
-  uint64_t icon = 0;
-  uint16_t color = to565(255, 255, 255);
-
-  switch (scene.weatherIconKind) {
-    case WEATHER_ICON_CLEAR_DAY:
-      icon = SUNNY_ICON;
-      color = to565(255, 220, 0);
-      break;
-    case WEATHER_ICON_CLEAR_NIGHT:
-      icon = UNKNOWN_ICON;
-      color = to565(120, 170, 255);
-      break;
-    case WEATHER_ICON_PARTLY_CLOUDY_DAY:
-      icon = CLOUD_ICON;
-      color = to565(220, 220, 220);
-      break;
-    case WEATHER_ICON_PARTLY_CLOUDY_NIGHT:
-      icon = CLOUD_ICON;
-      color = to565(170, 170, 200);
-      break;
-    case WEATHER_ICON_CLOUDY:
-      icon = CLOUD_ICON;
-      color = to565(220, 220, 220);
-      break;
-    case WEATHER_ICON_FOG:
-      icon = UNKNOWN_ICON;
-      color = to565(170, 170, 170);
-      break;
-    case WEATHER_ICON_RAIN:
-      icon = SHOWERS_ICON;
-      color = to565(80, 180, 255);
-      break;
-    case WEATHER_ICON_SNOW:
-      icon = SNOW_ICON;
-      color = to565(200, 240, 255);
-      break;
-    case WEATHER_ICON_STORM:
-      icon = STORM_ICON;
-      color = to565(255, 180, 0);
-      break;
-    default:
-      return;
-  }
-
-  drawWeatherValue64(icon, scene.weatherIconX, scene.weatherIconY, color);
-}
-
-WeatherIconKind iconKindForWeatherCode(uint8_t weatherCode, bool isDay) {
-  switch (weatherCode) {
-    case 0:
-      return isDay ? WEATHER_ICON_CLEAR_DAY : WEATHER_ICON_CLEAR_NIGHT;
-    case 1:
-    case 2:
-      return isDay ? WEATHER_ICON_PARTLY_CLOUDY_DAY : WEATHER_ICON_PARTLY_CLOUDY_NIGHT;
-    case 3:
-      return WEATHER_ICON_CLOUDY;
-    case 45:
-    case 48:
-      return WEATHER_ICON_FOG;
-    case 51:
-    case 53:
-    case 55:
-    case 56:
-    case 57:
-    case 61:
-    case 63:
-    case 65:
-    case 66:
-    case 67:
-    case 80:
-    case 81:
-    case 82:
-      return WEATHER_ICON_RAIN;
-    case 71:
-    case 73:
-    case 75:
-    case 77:
-    case 85:
-    case 86:
-      return WEATHER_ICON_SNOW;
-    case 95:
-    case 96:
-    case 99:
-      return WEATHER_ICON_STORM;
-    default:
-      return WEATHER_ICON_CLOUDY;
-  }
-}
-
 bool updateWeatherDisplay() {
   if (scene.weatherTempId == 0) {
     return false;
@@ -1126,7 +1002,7 @@ bool updateWeatherDisplay() {
     changed = true;
   }
 
-  WeatherIconKind nextIconKind = iconKindForWeatherCode(weather->weatherCode, weather->isDay);
+  WeatherIconKind nextIconKind = weather_icons::iconKindForWeatherCode(weather->weatherCode, weather->isDay);
   if (!scene.weatherIconVisible || scene.weatherIconKind != nextIconKind) {
     scene.weatherIconVisible = true;
     scene.weatherIconKind = nextIconKind;
@@ -1152,7 +1028,7 @@ void renderScene() {
   }
 
   if (scene.weatherIconVisible && scene.weatherIconKind != WEATHER_ICON_NONE) {
-    drawWeatherIcon();
+    weather_icons::drawWeatherIcon(matrix, scene.weatherIconKind, scene.weatherIconX, scene.weatherIconY);
   }
 
   presentFrame();
