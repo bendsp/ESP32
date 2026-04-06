@@ -224,6 +224,18 @@ bool setTextElementContent(SceneState& scene, uint16_t id, const char* content, 
   return true;
 }
 
+bool setTextElementPosition(SceneState& scene, uint16_t id, int16_t x, int16_t y) {
+  TextElement* element = findTextElementById(scene, id);
+  if (element == nullptr) {
+    return false;
+  }
+
+  element->style.x = x;
+  element->style.y = y;
+  resetTextAnimation(*element);
+  return true;
+}
+
 bool assignTextElementZone(SceneState& scene, uint16_t elementId, uint16_t zoneId) {
   TextElement* element = findTextElementById(scene, elementId);
   if (element == nullptr) {

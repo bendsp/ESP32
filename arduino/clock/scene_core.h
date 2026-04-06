@@ -80,6 +80,7 @@ const TextElement* getTextElement(const SceneState& scene, uint16_t id);
 uint16_t createTextElement(SceneState& scene, const char* content, const TextStyle& style, bool* truncated);
 bool deleteTextElement(SceneState& scene, uint16_t id);
 bool setTextElementContent(SceneState& scene, uint16_t id, const char* content, bool* truncated);
+bool setTextElementPosition(SceneState& scene, uint16_t id, int16_t x, int16_t y);
 bool assignTextElementZone(SceneState& scene, uint16_t elementId, uint16_t zoneId);
 bool enableTextScroll(SceneState& scene, uint16_t elementId, bool enabled);
 bool setTextElementScrollMode(SceneState& scene, uint16_t elementId, ScrollMode mode);

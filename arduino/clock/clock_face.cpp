@@ -1,44 +1,62 @@
 #include "clock_face.h"
 
-#include <stdio.h>
-#include <string.h>
-
 #include "display_matrix.h"
 
 namespace {
 
-bool updateWeatherDisplay(ClockFaceState& state, const WeatherServiceState& weatherService) {
-  if (state.weatherTempTextId == 0) {
-    return false;
+constexpr LayoutInsets kTopWidgetInsets = {1, 1, 1, 1};
+constexpr int16_t kTopSlotColumnSpan = 4;
+constexpr int16_t kClockBlockTopPadding = 4;
+
+WidgetPlacement topSlotPlacement(bool rightSide) {
+  uint8_t columnStart = rightSide ? kTopSlotColumnSpan : 0;
+  LayoutRect slotRect = makeColumnSlotRect(columnStart, kTopSlotColumnSpan, 0, kLayoutTopRowHeight);
+  return makeWidgetPlacement(slotRect, kTopWidgetInsets);
+}
+
+void placeTopWidget(
+    ClockTopWidget widgetKind,
+    ClockFaceState& state,
+    MatrixPanel_I2S_DMA* matrix,
+    const WidgetPlacement& placement) {
+  if (widgetKind == CLOCK_TOP_WIDGET_WEATHER) {
+    placeWeatherWidget(state.weatherWidget, state.scene, matrix, placement);
+    return;
   }
 
-  const WeatherData* weather = getCurrentWeather(weatherService);
-  if (weather == nullptr) {
-    return false;
+  placeDateWidget(state.dateWidget, state.scene, matrix, placement);
+}
+
+void placeTimeBlock(ClockFaceState& state, MatrixPanel_I2S_DMA* matrix) {
+  if (matrix == nullptr || state.hoursTextId == 0 || state.colonTextId == 0 || state.minutesTextId == 0) {
+    return;
   }
 
-  char temperatureText[8];
-  snprintf(temperatureText, sizeof(temperatureText), "%d\xF7", weather->temperatureC);
+  TextStyle clockStyle = defaultTextStyle();
+  clockStyle.size = 2;
 
-  bool changed = false;
-  const TextElement* weatherElement = getTextElement(state.scene, state.weatherTempTextId);
-  if (weatherElement != nullptr && strcmp(weatherElement->content, temperatureText) != 0) {
-    setTextElementContent(state.scene, state.weatherTempTextId, temperatureText, nullptr);
-    changed = true;
-  }
+  TextMetrics fullMetrics = measureTextAt(matrix, "XX:XX", clockStyle.size, 0, 0);
+  TextMetrics hoursMetrics = measureTextAt(matrix, "XX", clockStyle.size, 0, 0);
+  TextMetrics colonMetrics = measureTextAt(matrix, ":", clockStyle.size, 0, 0);
 
-  WeatherIconKind nextIconKind = weather_icons::iconKindForWeatherCode(weather->weatherCode, weather->isDay);
-  if (!state.overlay.weatherIconVisible || state.overlay.weatherIconKind != nextIconKind) {
-    state.overlay.weatherIconVisible = true;
-    state.overlay.weatherIconKind = nextIconKind;
-    changed = true;
-  }
+  int16_t groupX = (kDisplayMatrixPanelWidth - static_cast<int16_t>(fullMetrics.width)) / 2 - fullMetrics.x1;
+  int16_t groupY = kLayoutTopRowHeight + kClockBlockTopPadding - fullMetrics.y1;
 
-  return changed;
+  setTextElementPosition(state.scene, state.hoursTextId, groupX, groupY);
+  setTextElementPosition(
+      state.scene,
+      state.colonTextId,
+      groupX + static_cast<int16_t>(hoursMetrics.width),
+      groupY);
+  setTextElementPosition(
+      state.scene,
+      state.minutesTextId,
+      groupX + static_cast<int16_t>(hoursMetrics.width) + static_cast<int16_t>(colonMetrics.width),
+      groupY);
 }
 
 bool updateClockDisplayFromRtc(ClockFaceState& state, TimeServiceState& timeService) {
-  if (state.dateTextId == 0 || state.hoursTextId == 0 || state.minutesTextId == 0) {
+  if (state.hoursTextId == 0 || state.minutesTextId == 0) {
     return false;
   }
 
@@ -49,21 +67,10 @@ bool updateClockDisplayFromRtc(ClockFaceState& state, TimeServiceState& timeServ
 
   char hoursText[3];
   char minutesText[3];
-  char dateText[12];
   snprintf(hoursText, sizeof(hoursText), "%02d", timeInfo.tm_hour);
   snprintf(minutesText, sizeof(minutesText), "%02d", timeInfo.tm_min);
-  static const char* kMonthNames[] = {
-      "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-      "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
-  snprintf(dateText, sizeof(dateText), "%s %d", kMonthNames[timeInfo.tm_mon], timeInfo.tm_mday);
 
   bool changed = false;
-  const TextElement* dateElement = getTextElement(state.scene, state.dateTextId);
-  if (dateElement != nullptr && strcmp(dateElement->content, dateText) != 0) {
-    setTextElementContent(state.scene, state.dateTextId, dateText, nullptr);
-    changed = true;
-  }
-
   const TextElement* hoursElement = getTextElement(state.scene, state.hoursTextId);
   if (hoursElement != nullptr && strcmp(hoursElement->content, hoursText) != 0) {
     setTextElementContent(state.scene, state.hoursTextId, hoursText, nullptr);
@@ -81,67 +88,64 @@ bool updateClockDisplayFromRtc(ClockFaceState& state, TimeServiceState& timeServ
 
 }  // namespace
 
+ClockFaceArrangement defaultClockFaceArrangement() {
+  ClockFaceArrangement arrangement = {CLOCK_TOP_WIDGET_DATE, CLOCK_TOP_WIDGET_WEATHER};
+  return arrangement;
+}
+
 void initClockFace(ClockFaceState& state, MatrixPanel_I2S_DMA* matrix) {
   initScene(state.scene);
   clearSceneRenderOverlay(state.overlay);
-  state.dateTextId = 0;
+  state.arrangement = defaultClockFaceArrangement();
+  state.dateWidget = {};
+  state.weatherWidget = {};
   state.hoursTextId = 0;
+  state.colonTextId = 0;
   state.minutesTextId = 0;
-  state.weatherTempTextId = 0;
   state.dirty = true;
 
   if (matrix == nullptr) {
     return;
   }
 
-  TextStyle dateStyle = defaultTextStyle();
-  dateStyle.size = 1;
-  TextMetrics dateMetrics = measureTextAt(matrix, "Apr 30", dateStyle.size, 1, 0);
-  dateStyle.x = 1;
-  dateStyle.y = 1 - dateMetrics.y1;
-  state.dateTextId = createTextElement(state.scene, "___ __", dateStyle, nullptr);
-
-  TextStyle weatherStyle = defaultTextStyle();
-  weatherStyle.size = 1;
-  TextMetrics weatherMetrics = measureTextAt(matrix, "--\xF7", weatherStyle.size, 0, 0);
-  weatherStyle.x = kDisplayMatrixPanelWidth - 1 - static_cast<int16_t>(weatherMetrics.width) - weatherMetrics.x1;
-  weatherStyle.y = 1 - weatherMetrics.y1;
-  state.weatherTempTextId = createTextElement(state.scene, "--\xF7", weatherStyle, nullptr);
-  state.overlay.weatherIconVisible = false;
-  state.overlay.weatherIconKind = WEATHER_ICON_NONE;
-  state.overlay.weatherIconX = weatherStyle.x - 9;
-  state.overlay.weatherIconY = 1;
+  initDateWidget(state.dateWidget, state.scene);
+  initWeatherWidget(state.weatherWidget, state.scene);
 
   TextStyle clockStyle = defaultTextStyle();
   clockStyle.size = 2;
 
-  TextMetrics fullMetrics = measureTextAt(matrix, "XX:XX", clockStyle.size, 0, 0);
-  TextMetrics hoursMetrics = measureTextAt(matrix, "XX", clockStyle.size, 0, 0);
-  TextMetrics colonMetrics = measureTextAt(matrix, ":", clockStyle.size, 0, 0);
-
-  int16_t groupX = (kDisplayMatrixPanelWidth - static_cast<int16_t>(fullMetrics.width)) / 2 - fullMetrics.x1;
-  int16_t groupY = dateStyle.y + static_cast<int16_t>(dateMetrics.height) + 4 - fullMetrics.y1;
-
   TextStyle hoursStyle = clockStyle;
-  hoursStyle.x = groupX;
-  hoursStyle.y = groupY;
   state.hoursTextId = createTextElement(state.scene, "XX", hoursStyle, nullptr);
 
   TextStyle colonStyle = clockStyle;
-  colonStyle.x = groupX + static_cast<int16_t>(hoursMetrics.width);
-  colonStyle.y = groupY;
   colonStyle.blink = true;
-  createTextElement(state.scene, ":", colonStyle, nullptr);
+  state.colonTextId = createTextElement(state.scene, ":", colonStyle, nullptr);
 
   TextStyle minutesStyle = clockStyle;
-  minutesStyle.x = colonStyle.x + static_cast<int16_t>(colonMetrics.width);
-  minutesStyle.y = groupY;
   state.minutesTextId = createTextElement(state.scene, "XX", minutesStyle, nullptr);
+
+  applyClockFaceArrangement(state, matrix, state.arrangement);
+}
+
+void applyClockFaceArrangement(ClockFaceState& state, MatrixPanel_I2S_DMA* matrix, const ClockFaceArrangement& arrangement) {
+  state.arrangement = arrangement;
+
+  WidgetPlacement leftPlacement = topSlotPlacement(false);
+  WidgetPlacement rightPlacement = topSlotPlacement(true);
+  placeTopWidget(state.arrangement.leftTopWidget, state, matrix, leftPlacement);
+  placeTopWidget(state.arrangement.rightTopWidget, state, matrix, rightPlacement);
+  state.overlay.weatherIconVisible = state.weatherWidget.iconVisible;
+  state.overlay.weatherIconKind = state.weatherWidget.iconKind;
+  state.overlay.weatherIconX = state.weatherWidget.iconX;
+  state.overlay.weatherIconY = state.weatherWidget.iconY;
+  placeTimeBlock(state, matrix);
+  state.dirty = true;
 }
 
 void tickClockFace(ClockFaceState& state, TimeServiceState& timeService, const WeatherServiceState& weatherService) {
   bool changed = false;
-  changed = updateWeatherDisplay(state, weatherService) || changed;
+  changed = updateDateWidget(state.dateWidget, state.scene, timeService) || changed;
+  changed = updateWeatherWidget(state.weatherWidget, state.scene, weatherService, state.overlay) || changed;
   changed = updateClockDisplayFromRtc(state, timeService) || changed;
   state.dirty = state.dirty || changed;
 }
