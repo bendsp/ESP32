@@ -1,7 +1,9 @@
 #include <ESP32-HUB75-MatrixPanel-I2S-DMA.h>
 #include "clock_config.h"
 #include "network_time.h"
+#include "weather.h"
 #include <ctype.h>
+#include <esp_system.h>
 #include <limits.h>
 #include <math.h>
 #include <stdint.h>
@@ -37,12 +39,25 @@
 #define TEXT_CONTENT_CAPACITY 32
 #define SERIAL_LINE_CAPACITY 128
 #define DEFAULT_BLINK_INTERVAL_MS 1000
-#define DEFAULT_SCROLL_SPEED_PX_PER_SEC 10
-#define DEFAULT_SCROLL_PAUSE_MS 1000
+#define DEFAULT_SCROLL_SPEED_PX_PER_SEC 8
+#define DEFAULT_SCROLL_PAUSE_MS 1500
 #define DEFAULT_SCROLL_GAP_PX 8
 enum ScrollMode : uint8_t {
   SCROLL_MODE_BOUNCE = 0,
   SCROLL_MODE_LOOP = 1
+};
+
+enum WeatherIconKind : uint8_t {
+  WEATHER_ICON_NONE = 0,
+  WEATHER_ICON_CLEAR_DAY,
+  WEATHER_ICON_CLEAR_NIGHT,
+  WEATHER_ICON_PARTLY_CLOUDY_DAY,
+  WEATHER_ICON_PARTLY_CLOUDY_NIGHT,
+  WEATHER_ICON_CLOUDY,
+  WEATHER_ICON_FOG,
+  WEATHER_ICON_RAIN,
+  WEATHER_ICON_SNOW,
+  WEATHER_ICON_STORM
 };
 
 struct TextStyle {
@@ -91,6 +106,11 @@ struct SceneState {
   uint16_t clockDateId;
   uint16_t clockHoursId;
   uint16_t clockMinutesId;
+  uint16_t weatherTempId;
+  bool weatherIconVisible;
+  WeatherIconKind weatherIconKind;
+  int16_t weatherIconX;
+  int16_t weatherIconY;
   Zone zones[MAX_ZONES];
   TextElement textElements[MAX_TEXT_ELEMENTS];
   uint16_t nextZoneId;
@@ -258,8 +278,57 @@ private:
 ClippedMatrixPanel* matrix = nullptr;
 SceneState scene;
 NetworkTimeState networkTime;
+WeatherState weatherState;
 char serialLineBuffer[SERIAL_LINE_CAPACITY];
 size_t serialLineLength = 0;
+
+const char* getResetReasonLabel(esp_reset_reason_t reason) {
+  switch (reason) {
+    case ESP_RST_UNKNOWN:
+      return "unknown";
+    case ESP_RST_POWERON:
+      return "power-on";
+    case ESP_RST_EXT:
+      return "external pin";
+    case ESP_RST_SW:
+      return "software";
+    case ESP_RST_PANIC:
+      return "panic";
+    case ESP_RST_INT_WDT:
+      return "interrupt watchdog";
+    case ESP_RST_TASK_WDT:
+      return "task watchdog";
+    case ESP_RST_WDT:
+      return "other watchdog";
+    case ESP_RST_DEEPSLEEP:
+      return "deep sleep";
+    case ESP_RST_BROWNOUT:
+      return "brownout";
+    case ESP_RST_SDIO:
+      return "sdio";
+    case ESP_RST_USB:
+      return "usb";
+    case ESP_RST_JTAG:
+      return "jtag";
+    case ESP_RST_EFUSE:
+      return "efuse";
+    case ESP_RST_PWR_GLITCH:
+      return "power glitch";
+    case ESP_RST_CPU_LOCKUP:
+      return "cpu lockup";
+    default:
+      return "unmapped";
+  }
+}
+
+void printResetReason() {
+  esp_reset_reason_t reason = esp_reset_reason();
+  Serial.print("Reset reason: ");
+  Serial.print(getResetReasonLabel(reason));
+  Serial.print(" (");
+  Serial.print(static_cast<int>(reason));
+  Serial.println(")");
+}
 
 TextStyle defaultTextStyle() {
   TextStyle style = {0, 0, 1, 255, 255, 255, false, true, false};
@@ -445,11 +514,17 @@ void initScene() {
   scene.clockDateId = 0;
   scene.clockHoursId = 0;
   scene.clockMinutesId = 0;
+  scene.weatherTempId = 0;
+  scene.weatherIconVisible = false;
+  scene.weatherIconKind = WEATHER_ICON_NONE;
+  scene.weatherIconX = 0;
+  scene.weatherIconY = 0;
   scene.nextZoneId = 1;
   scene.nextTextElementId = 1;
   scene.nextDrawOrder = 1;
 
   initNetworkTimeState(networkTime);
+  initWeatherState(weatherState);
 
   for (uint8_t i = 0; i < MAX_ZONES; i++) {
     resetZone(scene.zones[i]);
@@ -467,8 +542,14 @@ void clearScene() {
   scene.clockDateId = 0;
   scene.clockHoursId = 0;
   scene.clockMinutesId = 0;
+  scene.weatherTempId = 0;
+  scene.weatherIconVisible = false;
+  scene.weatherIconKind = WEATHER_ICON_NONE;
+  scene.weatherIconX = 0;
+  scene.weatherIconY = 0;
 
   initNetworkTimeState(networkTime);
+  initWeatherState(weatherState);
 
   for (uint8_t i = 0; i < MAX_ZONES; i++) {
     resetZone(scene.zones[i]);
@@ -913,6 +994,219 @@ int findNextDrawOrderElement(int lastDrawOrder) {
   return bestIndex;
 }
 
+void drawWeatherBitmap8(const uint8_t rows[8], int16_t x, int16_t y, uint16_t color) {
+  for (uint8_t row = 0; row < 8; row++) {
+    for (uint8_t column = 0; column < 8; column++) {
+      if ((rows[row] & (1U << (7 - column))) == 0) {
+        continue;
+      }
+
+      matrix->drawPixel(x + column, y + row, color);
+    }
+  }
+}
+
+void drawWeatherIcon() {
+  static const uint8_t CLEAR_DAY_ICON[8] = {
+    0b00111100,
+    0b01011010,
+    0b10111101,
+    0b11111111,
+    0b11111111,
+    0b10111101,
+    0b01011010,
+    0b00111100
+  };
+  static const uint8_t CLEAR_NIGHT_ICON[8] = {
+    0b00011110,
+    0b00111100,
+    0b01111000,
+    0b01110000,
+    0b11110000,
+    0b11100000,
+    0b01100000,
+    0b00110000
+  };
+  static const uint8_t PARTLY_CLOUDY_ICON[8] = {
+    0b00011000,
+    0b00111100,
+    0b01111110,
+    0b00111110,
+    0b01111111,
+    0b11111111,
+    0b01111110,
+    0b00000000
+  };
+  static const uint8_t CLOUDY_ICON[8] = {
+    0b00000000,
+    0b00111000,
+    0b01111100,
+    0b11111110,
+    0b11111111,
+    0b11111111,
+    0b01111110,
+    0b00000000
+  };
+  static const uint8_t FOG_ICON[8] = {
+    0b00000000,
+    0b01111110,
+    0b00000000,
+    0b00111100,
+    0b00000000,
+    0b01111110,
+    0b00000000,
+    0b00111100
+  };
+  static const uint8_t RAIN_ICON[8] = {
+    0b00111000,
+    0b01111100,
+    0b11111110,
+    0b01111110,
+    0b00010010,
+    0b00100100,
+    0b01001000,
+    0b00010000
+  };
+  static const uint8_t SNOW_ICON[8] = {
+    0b00011000,
+    0b10011001,
+    0b01011010,
+    0b00111100,
+    0b00111100,
+    0b01011010,
+    0b10011001,
+    0b00011000
+  };
+  static const uint8_t STORM_ICON[8] = {
+    0b00111000,
+    0b01111100,
+    0b11111110,
+    0b01111110,
+    0b00011000,
+    0b00110000,
+    0b00011000,
+    0b00110000
+  };
+
+  const uint8_t* icon = nullptr;
+  uint16_t color = to565(255, 255, 255);
+
+  switch (scene.weatherIconKind) {
+    case WEATHER_ICON_CLEAR_DAY:
+      icon = CLEAR_DAY_ICON;
+      color = to565(255, 220, 0);
+      break;
+    case WEATHER_ICON_CLEAR_NIGHT:
+      icon = CLEAR_NIGHT_ICON;
+      color = to565(120, 170, 255);
+      break;
+    case WEATHER_ICON_PARTLY_CLOUDY_DAY:
+      icon = PARTLY_CLOUDY_ICON;
+      color = to565(255, 220, 0);
+      break;
+    case WEATHER_ICON_PARTLY_CLOUDY_NIGHT:
+      icon = PARTLY_CLOUDY_ICON;
+      color = to565(120, 170, 255);
+      break;
+    case WEATHER_ICON_CLOUDY:
+      icon = CLOUDY_ICON;
+      color = to565(220, 220, 220);
+      break;
+    case WEATHER_ICON_FOG:
+      icon = FOG_ICON;
+      color = to565(170, 170, 170);
+      break;
+    case WEATHER_ICON_RAIN:
+      icon = RAIN_ICON;
+      color = to565(80, 180, 255);
+      break;
+    case WEATHER_ICON_SNOW:
+      icon = SNOW_ICON;
+      color = to565(200, 240, 255);
+      break;
+    case WEATHER_ICON_STORM:
+      icon = STORM_ICON;
+      color = to565(255, 180, 0);
+      break;
+    default:
+      return;
+  }
+
+  drawWeatherBitmap8(icon, scene.weatherIconX, scene.weatherIconY, color);
+}
+
+WeatherIconKind iconKindForWeatherCode(uint8_t weatherCode, bool isDay) {
+  switch (weatherCode) {
+    case 0:
+      return isDay ? WEATHER_ICON_CLEAR_DAY : WEATHER_ICON_CLEAR_NIGHT;
+    case 1:
+    case 2:
+      return isDay ? WEATHER_ICON_PARTLY_CLOUDY_DAY : WEATHER_ICON_PARTLY_CLOUDY_NIGHT;
+    case 3:
+      return WEATHER_ICON_CLOUDY;
+    case 45:
+    case 48:
+      return WEATHER_ICON_FOG;
+    case 51:
+    case 53:
+    case 55:
+    case 56:
+    case 57:
+    case 61:
+    case 63:
+    case 65:
+    case 66:
+    case 67:
+    case 80:
+    case 81:
+    case 82:
+      return WEATHER_ICON_RAIN;
+    case 71:
+    case 73:
+    case 75:
+    case 77:
+    case 85:
+    case 86:
+      return WEATHER_ICON_SNOW;
+    case 95:
+    case 96:
+    case 99:
+      return WEATHER_ICON_STORM;
+    default:
+      return WEATHER_ICON_CLOUDY;
+  }
+}
+
+bool updateWeatherDisplay() {
+  if (scene.weatherTempId == 0) {
+    return false;
+  }
+
+  const WeatherData* weather = getCurrentWeather(weatherState);
+  if (weather == nullptr) {
+    return false;
+  }
+
+  char temperatureText[8];
+  snprintf(temperatureText, sizeof(temperatureText), "%dC", weather->temperatureC);
+
+  bool changed = false;
+  const TextElement* weatherElement = getTextElement(scene.weatherTempId);
+  if (weatherElement != nullptr && strcmp(weatherElement->content, temperatureText) != 0) {
+    setTextElementContent(scene.weatherTempId, temperatureText, nullptr);
+    changed = true;
+  }
+
+  WeatherIconKind nextIconKind = iconKindForWeatherCode(weather->weatherCode, weather->isDay);
+  if (!scene.weatherIconVisible || scene.weatherIconKind != nextIconKind) {
+    scene.weatherIconVisible = true;
+    scene.weatherIconKind = nextIconKind;
+    changed = true;
+  }
+
+  return changed;
+}
+
 void renderScene() {
   clearScreen();
   unsigned long nowMs = millis();
@@ -926,6 +1220,10 @@ void renderScene() {
 
     drawTextElement(scene.textElements[index], nowMs);
     lastDrawOrder = scene.textElements[index].drawOrder;
+  }
+
+  if (scene.weatherIconVisible && scene.weatherIconKind != WEATHER_ICON_NONE) {
+    drawWeatherIcon();
   }
 
   presentFrame();
@@ -1756,6 +2054,17 @@ void pollSerialCommands() {
 }
 
 void createStartupClockScene() {
+  TextStyle weatherStyle = defaultTextStyle();
+  weatherStyle.size = 1;
+  TextMetrics weatherMetrics = measureTextAt("--C", weatherStyle.size, 0, 0);
+  weatherStyle.x = 11;
+  weatherStyle.y = 1 - weatherMetrics.y1;
+  scene.weatherTempId = createTextElement("--C", weatherStyle, nullptr);
+  scene.weatherIconVisible = false;
+  scene.weatherIconKind = WEATHER_ICON_NONE;
+  scene.weatherIconX = 1;
+  scene.weatherIconY = 1;
+
   TextStyle dateStyle = defaultTextStyle();
   dateStyle.size = 1;
   TextMetrics dateMetrics = measureTextAt("___ ___ __", dateStyle.size, 0, 0);
@@ -1822,6 +2131,7 @@ void setup() {
 
   Serial.println();
   Serial.println("clock starting");
+  printResetReason();
 
   if (!beginMatrix()) {
     Serial.println("Matrix init failed");
@@ -1849,6 +2159,9 @@ void setup() {
 void loop() {
   pollSerialCommands();
   maintainTimeSync(networkTime);
+  if (maintainWeather(weatherState, networkTime.wifiConnected, millis()) && updateWeatherDisplay()) {
+    renderScene();
+  }
   if (updateClockDisplayFromRtc()) {
     renderScene();
   }
