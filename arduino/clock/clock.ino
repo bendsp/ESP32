@@ -1188,7 +1188,7 @@ bool updateWeatherDisplay() {
   }
 
   char temperatureText[8];
-  snprintf(temperatureText, sizeof(temperatureText), "%dC", weather->temperatureC);
+  snprintf(temperatureText, sizeof(temperatureText), "%d\xF7", weather->temperatureC);
 
   bool changed = false;
   const TextElement* weatherElement = getTextElement(scene.weatherTempId);
@@ -2042,20 +2042,20 @@ void pollSerialCommands() {
 void createStartupClockScene() {
   TextStyle dateStyle = defaultTextStyle();
   dateStyle.size = 1;
-  TextMetrics dateMetrics = measureTextAt("Apr 30", dateStyle.size, 0, 0);
-  dateStyle.x = 0;
+  TextMetrics dateMetrics = measureTextAt("Apr 30", dateStyle.size, 1, 0);
+  dateStyle.x = 1;
   dateStyle.y = 1 - dateMetrics.y1;
   scene.clockDateId = createTextElement("___ __", dateStyle, nullptr);
 
   TextStyle weatherStyle = defaultTextStyle();
   weatherStyle.size = 1;
-  TextMetrics weatherMetrics = measureTextAt("--C", weatherStyle.size, 0, 0);
+  TextMetrics weatherMetrics = measureTextAt("--\xF7", weatherStyle.size, 0, 0);
   weatherStyle.x = PANEL_WIDTH - 1 - static_cast<int16_t>(weatherMetrics.width) - weatherMetrics.x1;
   weatherStyle.y = 1 - weatherMetrics.y1;
-  scene.weatherTempId = createTextElement("--C", weatherStyle, nullptr);
+  scene.weatherTempId = createTextElement("--\xF7", weatherStyle, nullptr);
   scene.weatherIconVisible = false;
   scene.weatherIconKind = WEATHER_ICON_NONE;
-  scene.weatherIconX = weatherStyle.x - 10;
+  scene.weatherIconX = weatherStyle.x - 9;
   scene.weatherIconY = 1;
 
   TextStyle clockStyle = defaultTextStyle();
