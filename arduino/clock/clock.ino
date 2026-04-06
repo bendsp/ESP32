@@ -994,10 +994,11 @@ int findNextDrawOrderElement(int lastDrawOrder) {
   return bestIndex;
 }
 
-void drawWeatherBitmap8(const uint8_t rows[8], int16_t x, int16_t y, uint16_t color) {
+void drawWeatherValue64(uint64_t value, int16_t x, int16_t y, uint16_t color) {
   for (uint8_t row = 0; row < 8; row++) {
+    uint8_t rowBits = static_cast<uint8_t>((value >> (row * 8)) & 0xFFU);
     for (uint8_t column = 0; column < 8; column++) {
-      if ((rows[row] & (1U << (7 - column))) == 0) {
+      if (((rowBits >> column) & 0x01U) == 0) {
         continue;
       }
 
@@ -1007,117 +1008,45 @@ void drawWeatherBitmap8(const uint8_t rows[8], int16_t x, int16_t y, uint16_t co
 }
 
 void drawWeatherIcon() {
-  static const uint8_t CLEAR_DAY_ICON[8] = {
-    0b00111100,
-    0b01011010,
-    0b10111101,
-    0b11111111,
-    0b11111111,
-    0b10111101,
-    0b01011010,
-    0b00111100
-  };
-  static const uint8_t CLEAR_NIGHT_ICON[8] = {
-    0b00011110,
-    0b00111100,
-    0b01111000,
-    0b01110000,
-    0b11110000,
-    0b11100000,
-    0b01100000,
-    0b00110000
-  };
-  static const uint8_t PARTLY_CLOUDY_ICON[8] = {
-    0b00011000,
-    0b00111100,
-    0b01111110,
-    0b00111110,
-    0b01111111,
-    0b11111111,
-    0b01111110,
-    0b00000000
-  };
-  static const uint8_t CLOUDY_ICON[8] = {
-    0b00000000,
-    0b00111000,
-    0b01111100,
-    0b11111110,
-    0b11111111,
-    0b11111111,
-    0b01111110,
-    0b00000000
-  };
-  static const uint8_t FOG_ICON[8] = {
-    0b00000000,
-    0b01111110,
-    0b00000000,
-    0b00111100,
-    0b00000000,
-    0b01111110,
-    0b00000000,
-    0b00111100
-  };
-  static const uint8_t RAIN_ICON[8] = {
-    0b00111000,
-    0b01111100,
-    0b11111110,
-    0b01111110,
-    0b00010010,
-    0b00100100,
-    0b01001000,
-    0b00010000
-  };
-  static const uint8_t SNOW_ICON[8] = {
-    0b00011000,
-    0b10011001,
-    0b01011010,
-    0b00111100,
-    0b00111100,
-    0b01011010,
-    0b10011001,
-    0b00011000
-  };
-  static const uint8_t STORM_ICON[8] = {
-    0b00111000,
-    0b01111100,
-    0b11111110,
-    0b01111110,
-    0b00011000,
-    0b00110000,
-    0b00011000,
-    0b00110000
-  };
+  // Icons taken from https://github.com/caternuson/rpi-weather/blob/master/led8x8icons.py
+  static constexpr uint64_t SUNNY_ICON = 0x9142183dbc184289ULL;
+  static constexpr uint64_t RAIN_ICON = 0x55aa55aa55aa55aaULL;
+  static constexpr uint64_t CLOUD_ICON = 0x00007e818999710eULL;
+  static constexpr uint64_t SHOWERS_ICON = 0x152a7e818191710eULL;
+  static constexpr uint64_t SNOW_ICON = 0xa542a51818a542a5ULL;
+  static constexpr uint64_t STORM_ICON = 0x0a04087e8191710eULL;
+  static constexpr uint64_t UNKNOWN_ICON = 0x00004438006c6c00ULL;
 
-  const uint8_t* icon = nullptr;
+  uint64_t icon = 0;
   uint16_t color = to565(255, 255, 255);
 
   switch (scene.weatherIconKind) {
     case WEATHER_ICON_CLEAR_DAY:
-      icon = CLEAR_DAY_ICON;
+      icon = SUNNY_ICON;
       color = to565(255, 220, 0);
       break;
     case WEATHER_ICON_CLEAR_NIGHT:
-      icon = CLEAR_NIGHT_ICON;
+      icon = UNKNOWN_ICON;
       color = to565(120, 170, 255);
       break;
     case WEATHER_ICON_PARTLY_CLOUDY_DAY:
-      icon = PARTLY_CLOUDY_ICON;
-      color = to565(255, 220, 0);
+      icon = CLOUD_ICON;
+      color = to565(220, 220, 220);
       break;
     case WEATHER_ICON_PARTLY_CLOUDY_NIGHT:
-      icon = PARTLY_CLOUDY_ICON;
-      color = to565(120, 170, 255);
+      icon = CLOUD_ICON;
+      color = to565(170, 170, 200);
       break;
     case WEATHER_ICON_CLOUDY:
-      icon = CLOUDY_ICON;
+      icon = CLOUD_ICON;
       color = to565(220, 220, 220);
       break;
     case WEATHER_ICON_FOG:
-      icon = FOG_ICON;
+      icon = UNKNOWN_ICON;
       color = to565(170, 170, 170);
       break;
     case WEATHER_ICON_RAIN:
-      icon = RAIN_ICON;
+      icon = SHOWERS_ICON;
       color = to565(80, 180, 255);
       break;
     case WEATHER_ICON_SNOW:
@@ -1132,7 +1061,7 @@ void drawWeatherIcon() {
       return;
   }
 
-  drawWeatherBitmap8(icon, scene.weatherIconX, scene.weatherIconY, color);
+  drawWeatherValue64(icon, scene.weatherIconX, scene.weatherIconY, color);
 }
 
 WeatherIconKind iconKindForWeatherCode(uint8_t weatherCode, bool isDay) {
