@@ -1323,31 +1323,17 @@ bool updateClockDisplayFromRtc() {
 
   char hoursText[3];
   char minutesText[3];
-  char dateText[16];
+  char dateText[12];
   snprintf(hoursText, sizeof(hoursText), "%02d", timeInfo.tm_hour);
   snprintf(minutesText, sizeof(minutesText), "%02d", timeInfo.tm_min);
-  static const char* WEEKDAY_NAMES[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
   static const char* MONTH_NAMES[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
-  snprintf(
-      dateText,
-      sizeof(dateText),
-      "%s %s %d",
-      WEEKDAY_NAMES[timeInfo.tm_wday],
-      MONTH_NAMES[timeInfo.tm_mon],
-      timeInfo.tm_mday);
+  snprintf(dateText, sizeof(dateText), "%s %d", MONTH_NAMES[timeInfo.tm_mon], timeInfo.tm_mday);
 
   bool changed = false;
   const TextElement* dateElement = getTextElement(scene.clockDateId);
   if (dateElement != nullptr) {
     if (strcmp(dateElement->content, dateText) != 0) {
       setTextElementContent(scene.clockDateId, dateText, nullptr);
-      changed = true;
-    }
-
-    TextMetrics dateMetrics = measureTextAt(dateText, dateElement->style.size, 0, dateElement->style.y);
-    int16_t centeredX = (PANEL_WIDTH - static_cast<int16_t>(dateMetrics.width)) / 2 - dateMetrics.x1;
-    if (dateElement->style.x != centeredX) {
-      findTextElementById(scene.clockDateId)->style.x = centeredX;
       changed = true;
     }
   }
@@ -2054,20 +2040,23 @@ void pollSerialCommands() {
 }
 
 void createStartupClockScene() {
+  TextStyle dateStyle = defaultTextStyle();
+  dateStyle.size = 1;
+  TextMetrics dateMetrics = measureTextAt("Apr 30", dateStyle.size, 0, 0);
+  dateStyle.x = 0;
+  dateStyle.y = 1 - dateMetrics.y1;
+  scene.clockDateId = createTextElement("___ __", dateStyle, nullptr);
+
   TextStyle weatherStyle = defaultTextStyle();
   weatherStyle.size = 1;
   TextMetrics weatherMetrics = measureTextAt("--C", weatherStyle.size, 0, 0);
-  weatherStyle.x = 11;
+  weatherStyle.x = PANEL_WIDTH - 1 - static_cast<int16_t>(weatherMetrics.width) - weatherMetrics.x1;
   weatherStyle.y = 1 - weatherMetrics.y1;
   scene.weatherTempId = createTextElement("--C", weatherStyle, nullptr);
   scene.weatherIconVisible = false;
   scene.weatherIconKind = WEATHER_ICON_NONE;
-  scene.weatherIconX = 1;
+  scene.weatherIconX = weatherStyle.x - 10;
   scene.weatherIconY = 1;
-
-  TextStyle dateStyle = defaultTextStyle();
-  dateStyle.size = 1;
-  TextMetrics dateMetrics = measureTextAt("___ ___ __", dateStyle.size, 0, 0);
 
   TextStyle clockStyle = defaultTextStyle();
   clockStyle.size = 2;
@@ -2077,14 +2066,7 @@ void createStartupClockScene() {
   TextMetrics colonMetrics = measureTextAt(":", clockStyle.size, 0, 0);
 
   int16_t groupX = (PANEL_WIDTH - static_cast<int16_t>(fullMetrics.width)) / 2 - fullMetrics.x1;
-  int16_t groupY = (PANEL_HEIGHT - static_cast<int16_t>(fullMetrics.height)) / 2 - fullMetrics.y1;
-
-  dateStyle.x = (PANEL_WIDTH - static_cast<int16_t>(dateMetrics.width)) / 2 - dateMetrics.x1;
-  dateStyle.y = groupY - static_cast<int16_t>(dateMetrics.height) - 2;
-  if (dateStyle.y < 0) {
-    dateStyle.y = 0;
-  }
-  scene.clockDateId = createTextElement("___ ___ __", dateStyle, nullptr);
+  int16_t groupY = dateStyle.y + static_cast<int16_t>(dateMetrics.height) + 4 - fullMetrics.y1;
 
   TextStyle hoursStyle = clockStyle;
   hoursStyle.x = groupX;
@@ -2101,26 +2083,6 @@ void createStartupClockScene() {
   minutesStyle.x = colonStyle.x + static_cast<int16_t>(colonMetrics.width);
   minutesStyle.y = groupY;
   scene.clockMinutesId = createTextElement("XX", minutesStyle, nullptr);
-
-  TextStyle footerStyle = defaultTextStyle();
-  footerStyle.size = 1;
-  TextMetrics footerMetrics = measureTextAt("desprets.net", footerStyle.size, 0, 0);
-  int16_t footerZoneHeight = static_cast<int16_t>(footerMetrics.height);
-  int16_t footerZoneY = PANEL_HEIGHT - footerZoneHeight;
-  uint16_t footerZoneId = createZone(0, footerZoneY, PANEL_WIDTH, footerZoneHeight);
-
-  uint16_t footerId = createTextElement("desprets.net", footerStyle, nullptr);
-  TextElement* footer = findTextElementById(footerId);
-  if (footer != nullptr) {
-    footer->zoneId = footerZoneId;
-    footer->style.x = 0;
-    footer->style.y = footerZoneHeight - static_cast<int16_t>(footerMetrics.height) - footerMetrics.y1;
-    footer->scrollEnabled = true;
-    footer->scrollMode = SCROLL_MODE_BOUNCE;
-    footer->scrollSpeedPxPerSec = DEFAULT_SCROLL_SPEED_PX_PER_SEC;
-    footer->scrollPauseMs = DEFAULT_SCROLL_PAUSE_MS;
-    resetTextAnimation(*footer);
-  }
 }
 
 void setup() {
