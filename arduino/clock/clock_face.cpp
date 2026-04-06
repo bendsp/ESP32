@@ -147,10 +147,8 @@ void applyClockFaceArrangement(ClockFaceState& state, MatrixPanel_I2S_DMA* matri
   WidgetPlacement rightPlacement = topSlotPlacement(true);
   placeTopWidget(state.arrangement.leftTopWidget, state, matrix, leftPlacement);
   placeTopWidget(state.arrangement.rightTopWidget, state, matrix, rightPlacement);
-  state.overlay.debugCornersVisible = true;
-  state.overlay.debugRectCount = 2;
-  state.overlay.debugRects[0] = leftPlacement.slotRect;
-  state.overlay.debugRects[1] = rightPlacement.slotRect;
+  state.overlay.debugCornersVisible = false;
+  state.overlay.debugRectCount = 0;
   state.overlay.weatherIconVisible = state.weatherWidget.iconVisible;
   state.overlay.weatherIconKind = state.weatherWidget.iconKind;
   state.overlay.weatherIconX = state.weatherWidget.iconX;

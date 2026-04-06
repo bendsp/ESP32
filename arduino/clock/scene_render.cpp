@@ -136,7 +136,7 @@ void clearSceneRenderOverlay(SceneRenderOverlay& overlay) {
   overlay.weatherIconKind = WEATHER_ICON_NONE;
   overlay.weatherIconX = 0;
   overlay.weatherIconY = 0;
-  overlay.debugCornersVisible = true;
+  overlay.debugCornersVisible = false;
   overlay.debugRectCount = 0;
   for (uint8_t i = 0; i < 3; ++i) {
     overlay.debugRects[i] = makeLayoutRect(0, 0, 0, 0);
