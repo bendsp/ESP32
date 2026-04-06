@@ -1,38 +1,29 @@
-#include "network_time.h"
+#include "time_service.h"
 
 #include <WiFi.h>
 
 #include "clock_config.h"
 
-#define WIFI_CONNECT_TIMEOUT_MS 20000
-#define WIFI_STATUS_INTERVAL_MS 500
-#define WIFI_RETRY_INTERVAL_MS 10000
-#define INITIAL_TIME_SYNC_TIMEOUT_MS 10000
-#define TIME_SYNC_RETRY_INTERVAL_MS 60000
+namespace {
 
-void initNetworkTimeState(NetworkTimeState& state) {
-  state.wifiConnected = false;
-  state.wifiConnectionStarted = false;
-  state.timeSynced = false;
-  state.timeSyncStarted = false;
-  state.wifiConnectStartMs = 0;
-  state.lastWifiStatusMs = 0;
-  state.lastWifiRetryMs = 0;
-  state.lastTimeSyncAttemptMs = 0;
-}
+constexpr unsigned long kWifiConnectTimeoutMs = 20000;
+constexpr unsigned long kWifiStatusIntervalMs = 500;
+constexpr unsigned long kWifiRetryIntervalMs = 10000;
+constexpr unsigned long kInitialTimeSyncTimeoutMs = 10000;
+constexpr unsigned long kTimeSyncRetryIntervalMs = 60000;
 
-bool isWifiConnected() {
+bool isWifiConnectedNow() {
   return WiFi.status() == WL_CONNECTED;
 }
 
-bool connectToWifi(NetworkTimeState& state) {
+bool connectToWifi(TimeServiceState& state) {
   if (state.wifiConnected) {
     return true;
   }
 
   unsigned long nowMs = millis();
   if (!state.wifiConnectionStarted) {
-    if (state.lastWifiRetryMs != 0 && nowMs - state.lastWifiRetryMs < WIFI_RETRY_INTERVAL_MS) {
+    if (state.lastWifiRetryMs != 0 && nowMs - state.lastWifiRetryMs < kWifiRetryIntervalMs) {
       return false;
     }
 
@@ -47,7 +38,7 @@ bool connectToWifi(NetworkTimeState& state) {
     Serial.println(WIFI_SSID);
   }
 
-  if (isWifiConnected()) {
+  if (isWifiConnectedNow()) {
     state.wifiConnected = true;
     state.wifiConnectionStarted = false;
 
@@ -60,12 +51,12 @@ bool connectToWifi(NetworkTimeState& state) {
     return true;
   }
 
-  if (nowMs - state.lastWifiStatusMs >= WIFI_STATUS_INTERVAL_MS) {
+  if (nowMs - state.lastWifiStatusMs >= kWifiStatusIntervalMs) {
     Serial.print(".");
     state.lastWifiStatusMs = nowMs;
   }
 
-  if (nowMs - state.wifiConnectStartMs >= WIFI_CONNECT_TIMEOUT_MS) {
+  if (nowMs - state.wifiConnectStartMs >= kWifiConnectTimeoutMs) {
     Serial.println();
     Serial.println("Wi-Fi connection failed");
     WiFi.disconnect(true, true);
@@ -78,8 +69,8 @@ bool connectToWifi(NetworkTimeState& state) {
   return false;
 }
 
-bool syncTimeFromInternet(NetworkTimeState& state) {
-  if (!isWifiConnected()) {
+bool syncTimeFromInternet(TimeServiceState& state) {
+  if (!isWifiConnectedNow()) {
     if (state.wifiConnected) {
       Serial.println("Wi-Fi lost");
     }
@@ -106,7 +97,7 @@ bool syncTimeFromInternet(NetworkTimeState& state) {
     return true;
   }
 
-  if (nowMs - state.lastTimeSyncAttemptMs >= INITIAL_TIME_SYNC_TIMEOUT_MS) {
+  if (nowMs - state.lastTimeSyncAttemptMs >= kInitialTimeSyncTimeoutMs) {
     Serial.println("Initial NTP sync failed");
     state.timeSynced = false;
     state.timeSyncStarted = false;
@@ -116,8 +107,21 @@ bool syncTimeFromInternet(NetworkTimeState& state) {
   return false;
 }
 
-void maintainTimeSync(NetworkTimeState& state) {
-  if (!isWifiConnected()) {
+}  // namespace
+
+void initTimeServiceState(TimeServiceState& state) {
+  state.wifiConnected = false;
+  state.wifiConnectionStarted = false;
+  state.timeSynced = false;
+  state.timeSyncStarted = false;
+  state.wifiConnectStartMs = 0;
+  state.lastWifiStatusMs = 0;
+  state.lastWifiRetryMs = 0;
+  state.lastTimeSyncAttemptMs = 0;
+}
+
+void tickTimeService(TimeServiceState& state) {
+  if (!isWifiConnectedNow()) {
     state.wifiConnected = false;
     state.timeSynced = false;
     connectToWifi(state);
@@ -142,14 +146,14 @@ void maintainTimeSync(NetworkTimeState& state) {
 
   unsigned long nowMs = millis();
   if (!state.timeSyncStarted && state.lastTimeSyncAttemptMs != 0 &&
-      nowMs - state.lastTimeSyncAttemptMs < TIME_SYNC_RETRY_INTERVAL_MS) {
+      nowMs - state.lastTimeSyncAttemptMs < kTimeSyncRetryIntervalMs) {
     return;
   }
 
   syncTimeFromInternet(state);
 }
 
-bool readCurrentLocalTime(NetworkTimeState& state, tm& timeInfo, uint32_t timeoutMs) {
+bool readCurrentLocalTime(TimeServiceState& state, tm& timeInfo, uint32_t timeoutMs) {
   if (!getLocalTime(&timeInfo, timeoutMs)) {
     state.timeSynced = false;
     return false;
@@ -157,4 +161,8 @@ bool readCurrentLocalTime(NetworkTimeState& state, tm& timeInfo, uint32_t timeou
 
   state.timeSynced = true;
   return true;
+}
+
+bool isTimeServiceWifiConnected(const TimeServiceState& state) {
+  return state.wifiConnected;
 }

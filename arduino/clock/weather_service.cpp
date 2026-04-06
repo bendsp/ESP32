@@ -1,4 +1,4 @@
-#include "weather.h"
+#include "weather_service.h"
 
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
@@ -10,10 +10,10 @@
 
 namespace {
 
-const char* CURRENT_OBJECT_MARKER = "\"current\":{";
-const char* TEMPERATURE_FIELD = "\"temperature_2m\":";
-const char* WEATHER_CODE_FIELD = "\"weather_code\":";
-const char* IS_DAY_FIELD = "\"is_day\":";
+const char* kCurrentObjectMarker = "\"current\":{";
+const char* kTemperatureField = "\"temperature_2m\":";
+const char* kWeatherCodeField = "\"weather_code\":";
+const char* kIsDayField = "\"is_day\":";
 
 bool parseFloatField(const char* text, const char* field, float& value) {
   const char* fieldStart = strstr(text, field);
@@ -23,7 +23,7 @@ bool parseFloatField(const char* text, const char* field, float& value) {
 
   fieldStart += strlen(field);
   while (*fieldStart == ' ' || *fieldStart == '\t') {
-    fieldStart++;
+    ++fieldStart;
   }
 
   char* end = nullptr;
@@ -39,7 +39,7 @@ bool parseIntField(const char* text, const char* field, long& value) {
 
   fieldStart += strlen(field);
   while (*fieldStart == ' ' || *fieldStart == '\t') {
-    fieldStart++;
+    ++fieldStart;
   }
 
   char* end = nullptr;
@@ -48,7 +48,7 @@ bool parseIntField(const char* text, const char* field, long& value) {
 }
 
 bool parseWeatherResponse(const String& body, WeatherData& data) {
-  const char* currentObject = strstr(body.c_str(), CURRENT_OBJECT_MARKER);
+  const char* currentObject = strstr(body.c_str(), kCurrentObjectMarker);
   if (currentObject == nullptr) {
     return false;
   }
@@ -56,9 +56,9 @@ bool parseWeatherResponse(const String& body, WeatherData& data) {
   float temperature = 0.0f;
   long weatherCode = 0;
   long isDay = 0;
-  if (!parseFloatField(currentObject, TEMPERATURE_FIELD, temperature) ||
-      !parseIntField(currentObject, WEATHER_CODE_FIELD, weatherCode) ||
-      !parseIntField(currentObject, IS_DAY_FIELD, isDay)) {
+  if (!parseFloatField(currentObject, kTemperatureField, temperature) ||
+      !parseIntField(currentObject, kWeatherCodeField, weatherCode) ||
+      !parseIntField(currentObject, kIsDayField, isDay)) {
     return false;
   }
 
@@ -70,7 +70,7 @@ bool parseWeatherResponse(const String& body, WeatherData& data) {
   return true;
 }
 
-bool refreshWeatherNow(WeatherState& state, unsigned long nowMs) {
+bool refreshWeatherNow(WeatherServiceState& state, unsigned long nowMs) {
   WiFiClientSecure client;
   client.setInsecure();
 
@@ -123,7 +123,7 @@ bool refreshWeatherNow(WeatherState& state, unsigned long nowMs) {
 
 }  // namespace
 
-void initWeatherState(WeatherState& state) {
+void initWeatherServiceState(WeatherServiceState& state) {
   state.current.valid = false;
   state.current.temperatureC = 0;
   state.current.weatherCode = 0;
@@ -133,7 +133,7 @@ void initWeatherState(WeatherState& state) {
   state.refreshIntervalMs = WEATHER_REFRESH_INTERVAL_MS;
 }
 
-bool maintainWeather(WeatherState& state, bool wifiConnected, unsigned long nowMs) {
+bool tickWeatherService(WeatherServiceState& state, bool wifiConnected, unsigned long nowMs) {
   if (!wifiConnected) {
     return false;
   }
@@ -145,7 +145,7 @@ bool maintainWeather(WeatherState& state, bool wifiConnected, unsigned long nowM
   return refreshWeatherNow(state, nowMs);
 }
 
-const WeatherData* getCurrentWeather(const WeatherState& state) {
+const WeatherData* getCurrentWeather(const WeatherServiceState& state) {
   if (!state.current.valid) {
     return nullptr;
   }
