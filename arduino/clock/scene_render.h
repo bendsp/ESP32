@@ -4,6 +4,7 @@
 #include <ESP32-HUB75-MatrixPanel-I2S-DMA.h>
 
 #include "display_matrix.h"
+#include "layout.h"
 #include "scene_core.h"
 #include "weather_icons.h"
 
@@ -19,6 +20,9 @@ struct SceneRenderOverlay {
   WeatherIconKind weatherIconKind;
   int16_t weatherIconX;
   int16_t weatherIconY;
+  bool debugCornersVisible;
+  uint8_t debugRectCount;
+  LayoutRect debugRects[3];
 };
 
 TextMetrics measureTextAt(MatrixPanel_I2S_DMA* matrix, const char* text, uint8_t size, int16_t x, int16_t y);

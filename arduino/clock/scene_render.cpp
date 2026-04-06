@@ -16,6 +16,22 @@ void presentFrame(MatrixPanel_I2S_DMA* matrix) {
   matrix->flipDMABuffer();
 }
 
+void drawDebugRectCorners(MatrixPanel_I2S_DMA* matrix, const LayoutRect& rect) {
+  if (rect.width <= 0 || rect.height <= 0) {
+    return;
+  }
+
+  uint16_t color = to565(matrix, 255, 0, 0);
+  int16_t left = rect.x;
+  int16_t top = rect.y;
+  int16_t right = rect.x + rect.width - 1;
+  int16_t bottom = rect.y + rect.height - 1;
+  matrix->drawPixel(left, top, color);
+  matrix->drawPixel(right, top, color);
+  matrix->drawPixel(left, bottom, color);
+  matrix->drawPixel(right, bottom, color);
+}
+
 TextMetrics getTextMetrics(MatrixPanel_I2S_DMA* matrix, const TextElement& element, int16_t x, int16_t y) {
   return measureTextAt(matrix, element.content, element.style.size, x, y);
 }
@@ -120,6 +136,11 @@ void clearSceneRenderOverlay(SceneRenderOverlay& overlay) {
   overlay.weatherIconKind = WEATHER_ICON_NONE;
   overlay.weatherIconX = 0;
   overlay.weatherIconY = 0;
+  overlay.debugCornersVisible = true;
+  overlay.debugRectCount = 0;
+  for (uint8_t i = 0; i < 3; ++i) {
+    overlay.debugRects[i] = makeLayoutRect(0, 0, 0, 0);
+  }
 }
 
 void renderScene(DisplayContext& display, const SceneState& scene, const SceneRenderOverlay* overlay) {
@@ -144,6 +165,12 @@ void renderScene(DisplayContext& display, const SceneState& scene, const SceneRe
 
   if (overlay != nullptr && overlay->weatherIconVisible && overlay->weatherIconKind != WEATHER_ICON_NONE) {
     weather_icons::drawWeatherIcon(matrix, overlay->weatherIconKind, overlay->weatherIconX, overlay->weatherIconY);
+  }
+
+  if (overlay != nullptr && overlay->debugCornersVisible) {
+    for (uint8_t i = 0; i < overlay->debugRectCount; ++i) {
+      drawDebugRectCorners(matrix, overlay->debugRects[i]);
+    }
   }
 
   presentFrame(matrix);

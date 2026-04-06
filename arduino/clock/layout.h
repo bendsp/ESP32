@@ -32,7 +32,7 @@ struct WidgetPlacement {
 inline constexpr int16_t kLayoutColumnWidth = 8;
 inline constexpr int16_t kLayoutCanvasWidth = 64;
 inline constexpr int16_t kLayoutCanvasHeight = 64;
-inline constexpr int16_t kLayoutTopRowHeight = 32;
+inline constexpr int16_t kLayoutTopRowHeight = 8;
 
 LayoutRect makeLayoutRect(int16_t x, int16_t y, int16_t width, int16_t height);
 LayoutRect insetLayoutRect(const LayoutRect& rect, const LayoutInsets& insets);

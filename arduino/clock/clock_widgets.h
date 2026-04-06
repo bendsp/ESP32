@@ -10,7 +10,8 @@
 #include "weather_service.h"
 
 struct DateWidgetState {
-  uint16_t textId;
+  uint16_t monthTextId;
+  uint16_t dayTextId;
   TextStyle style;
   WidgetMetrics metrics;
   WidgetPlacement placement;
@@ -42,6 +43,7 @@ void placeWeatherWidget(
 bool updateWeatherWidget(
     WeatherWidgetState& widget,
     SceneState& scene,
+    MatrixPanel_I2S_DMA* matrix,
     const WeatherServiceState& weatherService,
     SceneRenderOverlay& overlay);
 

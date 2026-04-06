@@ -4,9 +4,9 @@
 
 namespace {
 
-constexpr LayoutInsets kTopWidgetInsets = {1, 1, 1, 1};
+constexpr LayoutInsets kTopWidgetInsets = {0, 0, 0, 0};
 constexpr int16_t kTopSlotColumnSpan = 4;
-constexpr int16_t kClockBlockTopY = 12;
+constexpr int16_t kClockBlockTopY = 11;
 
 WidgetPlacement topSlotPlacement(bool rightSide) {
   uint8_t columnStart = rightSide ? kTopSlotColumnSpan : 0;
@@ -41,6 +41,11 @@ void placeTimeBlock(ClockFaceState& state, MatrixPanel_I2S_DMA* matrix) {
 
   int16_t groupX = (kDisplayMatrixPanelWidth - static_cast<int16_t>(fullMetrics.width)) / 2 - fullMetrics.x1;
   int16_t groupY = kClockBlockTopY - fullMetrics.y1;
+  LayoutRect timeRect = makeLayoutRect(
+      groupX + fullMetrics.x1,
+      groupY + fullMetrics.y1,
+      static_cast<int16_t>(fullMetrics.width),
+      static_cast<int16_t>(fullMetrics.height));
 
   setTextElementPosition(state.scene, state.hoursTextId, groupX, groupY);
   setTextElementPosition(
@@ -53,6 +58,14 @@ void placeTimeBlock(ClockFaceState& state, MatrixPanel_I2S_DMA* matrix) {
       state.minutesTextId,
       groupX + static_cast<int16_t>(hoursMetrics.width) + static_cast<int16_t>(colonMetrics.width),
       groupY);
+
+  if (state.overlay.debugRectCount >= 3) {
+    state.overlay.debugRectCount = 2;
+  }
+  state.overlay.debugRects[2] = timeRect;
+  if (state.overlay.debugRectCount < 3) {
+    state.overlay.debugRectCount = 3;
+  }
 }
 
 bool updateClockDisplayFromRtc(ClockFaceState& state, TimeServiceState& timeService) {
@@ -134,6 +147,10 @@ void applyClockFaceArrangement(ClockFaceState& state, MatrixPanel_I2S_DMA* matri
   WidgetPlacement rightPlacement = topSlotPlacement(true);
   placeTopWidget(state.arrangement.leftTopWidget, state, matrix, leftPlacement);
   placeTopWidget(state.arrangement.rightTopWidget, state, matrix, rightPlacement);
+  state.overlay.debugCornersVisible = true;
+  state.overlay.debugRectCount = 2;
+  state.overlay.debugRects[0] = leftPlacement.slotRect;
+  state.overlay.debugRects[1] = rightPlacement.slotRect;
   state.overlay.weatherIconVisible = state.weatherWidget.iconVisible;
   state.overlay.weatherIconKind = state.weatherWidget.iconKind;
   state.overlay.weatherIconX = state.weatherWidget.iconX;
@@ -142,10 +159,14 @@ void applyClockFaceArrangement(ClockFaceState& state, MatrixPanel_I2S_DMA* matri
   state.dirty = true;
 }
 
-void tickClockFace(ClockFaceState& state, TimeServiceState& timeService, const WeatherServiceState& weatherService) {
+void tickClockFace(
+    ClockFaceState& state,
+    MatrixPanel_I2S_DMA* matrix,
+    TimeServiceState& timeService,
+    const WeatherServiceState& weatherService) {
   bool changed = false;
   changed = updateDateWidget(state.dateWidget, state.scene, timeService) || changed;
-  changed = updateWeatherWidget(state.weatherWidget, state.scene, weatherService, state.overlay) || changed;
+  changed = updateWeatherWidget(state.weatherWidget, state.scene, matrix, weatherService, state.overlay) || changed;
   changed = updateClockDisplayFromRtc(state, timeService) || changed;
   state.dirty = state.dirty || changed;
 }

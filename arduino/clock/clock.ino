@@ -104,7 +104,7 @@ void loop() {
 
   tickTimeService(timeService);
   tickWeatherService(weatherService, isTimeServiceWifiConnected(timeService), nowMs);
-  tickClockFace(clockFace, timeService, weatherService);
+  tickClockFace(clockFace, rawMatrix(display), timeService, weatherService);
 
   bool dirty = clockFaceIsDirty(clockFace);
   dirty = updateSceneAnimations(clockFaceScene(clockFace), rawMatrix(display), nowMs) || dirty;

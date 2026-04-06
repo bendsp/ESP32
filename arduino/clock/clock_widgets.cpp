@@ -8,8 +8,11 @@ namespace {
 constexpr int16_t kWeatherIconWidth = 8;
 constexpr int16_t kWeatherIconHeight = 8;
 constexpr int16_t kWeatherIconGap = 1;
-constexpr const char kDateSampleText[] = "Sep 30";
-constexpr const char kDatePlaceholderText[] = "___ __";
+constexpr int16_t kDateMonthDayGap = 1;
+constexpr const char kDateMonthSampleText[] = "Apr";
+constexpr const char kDateDaySampleText[] = "30";
+constexpr const char kDateMonthPlaceholderText[] = "___";
+constexpr const char kDateDayPlaceholderText[] = "00";
 constexpr const char kWeatherSampleText[] = "-12\xF7";
 constexpr const char kWeatherPlaceholderText[] = "--\xF7";
 
@@ -29,13 +32,15 @@ int16_t alignedTopCursorY(const LayoutRect& contentRect, const TextMetrics& metr
 }  // namespace
 
 void initDateWidget(DateWidgetState& widget, SceneState& scene) {
-  widget.textId = 0;
+  widget.monthTextId = 0;
+  widget.dayTextId = 0;
   widget.style = defaultTextStyle();
   widget.style.size = 1;
   widget.metrics = {0, 0, 0, 0};
   widget.placement = {makeLayoutRect(0, 0, 0, 0), makeLayoutRect(0, 0, 0, 0)};
 
-  widget.textId = createTextElement(scene, kDatePlaceholderText, widget.style, nullptr);
+  widget.monthTextId = createTextElement(scene, kDateMonthPlaceholderText, widget.style, nullptr);
+  widget.dayTextId = createTextElement(scene, kDateDayPlaceholderText, widget.style, nullptr);
 }
 
 WidgetMetrics measureDateWidget(const DateWidgetState& widget, MatrixPanel_I2S_DMA* matrix) {
@@ -44,31 +49,40 @@ WidgetMetrics measureDateWidget(const DateWidgetState& widget, MatrixPanel_I2S_D
     return metrics;
   }
 
-  TextMetrics sampleMetrics = measureTextAt(matrix, kDateSampleText, widget.style.size, 0, 0);
-  metrics.preferredWidth = static_cast<int16_t>(sampleMetrics.width);
-  metrics.preferredHeight = static_cast<int16_t>(sampleMetrics.height);
+  TextMetrics monthMetrics = measureTextAt(matrix, kDateMonthSampleText, widget.style.size, 0, 0);
+  TextMetrics dayMetrics = measureTextAt(matrix, kDateDaySampleText, widget.style.size, 0, 0);
+  metrics.preferredWidth =
+      static_cast<int16_t>(monthMetrics.width) + kDateMonthDayGap + static_cast<int16_t>(dayMetrics.width);
+  metrics.preferredHeight = static_cast<int16_t>(monthMetrics.height);
+  if (static_cast<int16_t>(dayMetrics.height) > metrics.preferredHeight) {
+    metrics.preferredHeight = static_cast<int16_t>(dayMetrics.height);
+  }
   metrics.minWidth = metrics.preferredWidth;
   metrics.minHeight = metrics.preferredHeight;
   return metrics;
 }
 
 void placeDateWidget(DateWidgetState& widget, SceneState& scene, MatrixPanel_I2S_DMA* matrix, const WidgetPlacement& placement) {
-  if (matrix == nullptr || widget.textId == 0) {
+  if (matrix == nullptr || widget.monthTextId == 0 || widget.dayTextId == 0) {
     return;
   }
 
   widget.metrics = measureDateWidget(widget, matrix);
   widget.placement = placement;
 
-  TextMetrics sampleMetrics = measureTextAt(matrix, kDateSampleText, widget.style.size, 0, 0);
-  int16_t frameX = alignedFrameX(placement.contentRect, widget.metrics.preferredWidth);
-  int16_t drawX = frameX - sampleMetrics.x1;
-  int16_t drawY = alignedTopCursorY(placement.contentRect, sampleMetrics);
-  setTextElementPosition(scene, widget.textId, drawX, drawY);
+  TextMetrics monthMetrics = measureTextAt(matrix, kDateMonthSampleText, widget.style.size, 0, 0);
+  TextMetrics dayMetrics = measureTextAt(matrix, kDateDaySampleText, widget.style.size, 0, 0);
+  int16_t frameX = alignedFrameX(placement.slotRect, widget.metrics.preferredWidth);
+  int16_t drawY = alignedTopCursorY(placement.contentRect, monthMetrics);
+  int16_t monthDrawX = frameX - monthMetrics.x1;
+  int16_t dayBoxX = frameX + static_cast<int16_t>(monthMetrics.width) + kDateMonthDayGap;
+  int16_t dayDrawX = dayBoxX - dayMetrics.x1;
+  setTextElementPosition(scene, widget.monthTextId, monthDrawX, drawY);
+  setTextElementPosition(scene, widget.dayTextId, dayDrawX, drawY);
 }
 
 bool updateDateWidget(DateWidgetState& widget, SceneState& scene, TimeServiceState& timeService) {
-  if (widget.textId == 0) {
+  if (widget.monthTextId == 0 || widget.dayTextId == 0) {
     return false;
   }
 
@@ -77,18 +91,28 @@ bool updateDateWidget(DateWidgetState& widget, SceneState& scene, TimeServiceSta
     return false;
   }
 
-  char dateText[12];
+  char monthText[4];
+  char dayText[3];
   static const char* kMonthNames[] = {
       "Jan", "Feb", "Mar", "Apr", "May", "Jun",
       "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
-  snprintf(dateText, sizeof(dateText), "%s %d", kMonthNames[timeInfo.tm_mon], timeInfo.tm_mday);
+  snprintf(monthText, sizeof(monthText), "%s", kMonthNames[timeInfo.tm_mon]);
+  snprintf(dayText, sizeof(dayText), "%02d", timeInfo.tm_mday);
 
-  const TextElement* dateElement = getTextElement(scene, widget.textId);
-  if (dateElement == nullptr || strcmp(dateElement->content, dateText) == 0) {
-    return false;
+  bool changed = false;
+  const TextElement* monthElement = getTextElement(scene, widget.monthTextId);
+  if (monthElement != nullptr && strcmp(monthElement->content, monthText) != 0) {
+    setTextElementContent(scene, widget.monthTextId, monthText, nullptr);
+    changed = true;
   }
 
-  return setTextElementContent(scene, widget.textId, dateText, nullptr);
+  const TextElement* dayElement = getTextElement(scene, widget.dayTextId);
+  if (dayElement != nullptr && strcmp(dayElement->content, dayText) != 0) {
+    setTextElementContent(scene, widget.dayTextId, dayText, nullptr);
+    changed = true;
+  }
+
+  return changed;
 }
 
 void initWeatherWidget(WeatherWidgetState& widget, SceneState& scene) {
@@ -120,6 +144,38 @@ WidgetMetrics measureWeatherWidget(const WeatherWidgetState& widget, MatrixPanel
   return metrics;
 }
 
+void placeWeatherWidgetFromCurrentContent(
+    WeatherWidgetState& widget,
+    SceneState& scene,
+    MatrixPanel_I2S_DMA* matrix) {
+  if (matrix == nullptr || widget.temperatureTextId == 0 || widget.placement.slotRect.width <= 0 ||
+      widget.placement.slotRect.height <= 0) {
+    return;
+  }
+
+  const TextElement* currentElement = getTextElement(scene, widget.temperatureTextId);
+  if (currentElement == nullptr) {
+    return;
+  }
+
+  TextMetrics currentTextMetrics =
+      measureTextAt(matrix, currentElement->content, widget.style.size, 0, 0);
+  int16_t currentTextWidth = static_cast<int16_t>(currentTextMetrics.width);
+  int16_t currentTextHeight = static_cast<int16_t>(currentTextMetrics.height);
+  int16_t clusterHeight = currentTextHeight > kWeatherIconHeight ? currentTextHeight : kWeatherIconHeight;
+
+  int16_t textBoxRight = widget.placement.slotRect.x + widget.placement.slotRect.width - 1;
+  int16_t textBoxX = textBoxRight - currentTextWidth + 1;
+  int16_t clusterY = widget.placement.slotRect.y;
+
+  widget.iconX = textBoxX - kWeatherIconGap - kWeatherIconWidth;
+  widget.iconY = clusterY + (clusterHeight - kWeatherIconHeight) / 2;
+
+  int16_t textDrawX = textBoxX - currentTextMetrics.x1;
+  int16_t textDrawY = alignedTopCursorY(widget.placement.slotRect, currentTextMetrics);
+  setTextElementPosition(scene, widget.temperatureTextId, textDrawX, textDrawY);
+}
+
 void placeWeatherWidget(
     WeatherWidgetState& widget,
     SceneState& scene,
@@ -131,23 +187,13 @@ void placeWeatherWidget(
 
   widget.metrics = measureWeatherWidget(widget, matrix);
   widget.placement = placement;
-
-  TextMetrics sampleTextMetrics = measureTextAt(matrix, kWeatherSampleText, widget.style.size, 0, 0);
-  int16_t clusterX = alignedFrameX(placement.contentRect, widget.metrics.preferredWidth);
-  int16_t clusterY = placement.contentRect.y;
-
-  widget.iconX = clusterX;
-  widget.iconY = clusterY + (widget.metrics.preferredHeight - kWeatherIconHeight) / 2;
-
-  int16_t textBoxX = clusterX + kWeatherIconWidth + kWeatherIconGap;
-  int16_t textDrawX = textBoxX - sampleTextMetrics.x1;
-  int16_t textDrawY = alignedTopCursorY(placement.contentRect, sampleTextMetrics);
-  setTextElementPosition(scene, widget.temperatureTextId, textDrawX, textDrawY);
+  placeWeatherWidgetFromCurrentContent(widget, scene, matrix);
 }
 
 bool updateWeatherWidget(
     WeatherWidgetState& widget,
     SceneState& scene,
+    MatrixPanel_I2S_DMA* matrix,
     const WeatherServiceState& weatherService,
     SceneRenderOverlay& overlay) {
   if (widget.temperatureTextId == 0) {
@@ -168,6 +214,8 @@ bool updateWeatherWidget(
     setTextElementContent(scene, widget.temperatureTextId, temperatureText, nullptr);
     changed = true;
   }
+
+  placeWeatherWidgetFromCurrentContent(widget, scene, matrix);
 
   WeatherIconKind nextIconKind = weather_icons::iconKindForWeatherCode(weather->weatherCode, weather->isDay);
   bool iconChanged = !widget.iconVisible || widget.iconKind != nextIconKind;

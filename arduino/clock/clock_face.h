@@ -35,7 +35,11 @@ struct ClockFaceState {
 ClockFaceArrangement defaultClockFaceArrangement();
 void initClockFace(ClockFaceState& state, MatrixPanel_I2S_DMA* matrix);
 void applyClockFaceArrangement(ClockFaceState& state, MatrixPanel_I2S_DMA* matrix, const ClockFaceArrangement& arrangement);
-void tickClockFace(ClockFaceState& state, TimeServiceState& timeService, const WeatherServiceState& weatherService);
+void tickClockFace(
+    ClockFaceState& state,
+    MatrixPanel_I2S_DMA* matrix,
+    TimeServiceState& timeService,
+    const WeatherServiceState& weatherService);
 bool clockFaceIsDirty(const ClockFaceState& state);
 void clearClockFaceDirty(ClockFaceState& state);
 SceneState& clockFaceScene(ClockFaceState& state);
